@@ -3,16 +3,18 @@ package com.kanon.dingpunchguard;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.ActivityOptions;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Build;
+import android.os.Bundle;
 
 final class NotificationHelper {
     private static final String GUARD_CHANNEL_ID = "guard_status";
-    private static final String ALERT_CHANNEL_ID = "punch_alert";
+    static final String ALERT_CHANNEL_ID = "punch_alert";
 
     private NotificationHelper() {
     }
@@ -230,7 +232,19 @@ final class NotificationHelper {
                 context,
                 requestCode,
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE,
+                backgroundLaunchOptions()
         );
+    }
+
+    private static Bundle backgroundLaunchOptions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            return null;
+        }
+        ActivityOptions options = ActivityOptions.makeBasic();
+        options.setPendingIntentCreatorBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+        );
+        return options.toBundle();
     }
 }

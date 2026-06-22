@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.19 - 2026-06-22
+
+- 钉钉 full-screen intent 的 `PendingIntent` 增加 Android 15+ 后台 Activity 启动 creator opt-in，避免 targetSdk 35+ 被系统后台启动限制拦截。
+- 后台拉起权限检查补充通知总开关、强提醒通知渠道是否关闭、强提醒渠道是否仍为高优先级；日志会输出对应状态和渠道 importance。
+- 权限页“后台拉起”会按缺项跳转：通知总开关、强提醒渠道、全屏通知、MIUI 权限页或应用详情页。
+
 ## v0.2.18 - 2026-06-22
 
 - 后台拉起权限检查补充 Android 14+ 的全屏通知授权状态，避免只看悬浮窗/MIUI 私有权限导致误判。

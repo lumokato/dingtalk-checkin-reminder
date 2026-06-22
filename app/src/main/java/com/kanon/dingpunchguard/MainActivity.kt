@@ -538,8 +538,43 @@ class MainActivity : ComponentActivity() {
         openAppSettings()
     }
 
+    private fun openAppNotificationSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (tryStartActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                )
+            ) {
+                return
+            }
+        }
+        openAppSettings()
+    }
+
+    private fun openAlertChannelSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (tryStartActivity(
+                    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                        .putExtra(Settings.EXTRA_CHANNEL_ID, NotificationHelper.ALERT_CHANNEL_ID)
+                )
+            ) {
+                return
+            }
+        }
+        openAppNotificationSettings()
+    }
+
     private fun openBackgroundLaunchSettings() {
         val status = BackgroundLaunchPermission.status(this)
+        if (!status.notificationsEnabled) {
+            openAppNotificationSettings()
+            return
+        }
+        if (!status.alertChannelEnabled || !status.alertChannelHighPriority) {
+            openAlertChannelSettings()
+            return
+        }
         if (!status.fullScreenIntentAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             try {
                 startActivity(
@@ -678,7 +713,7 @@ class MainActivity : ComponentActivity() {
             warnings.add("电池后台未放行，系统清理后提醒成功率会下降。")
         }
         if (!backgroundLaunchStatus.likelyAllowed()) {
-            warnings.add("后台启动/弹出未完全放行，应用在后台时系统可能拦截自动打开钉钉。")
+            warnings.add("后台拉起未完全放行：${backgroundLaunchStatus.displayText()}。")
         }
         if (!dingTalkInstalled) {
             warnings.add("没有解析到钉钉启动入口，请确认钉钉已安装。")
@@ -2430,7 +2465,7 @@ private fun PermissionsScreen(
                 )
                 PermissionLine(
                     title = "后台拉起",
-                    subtitle = if (dashboard.backgroundLaunchGranted) dashboard.backgroundLaunchText else "后台时系统可能拦截自动打开钉钉",
+                    subtitle = dashboard.backgroundLaunchText,
                     ok = dashboard.backgroundLaunchGranted,
                     action = "处理",
                     onAction = onOpenBackgroundLaunchSettings

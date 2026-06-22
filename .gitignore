@@ -1,0 +1,24 @@
+.gradle/
+.kotlin/
+build/
+**/build/
+
+local.properties
+signing.properties
+*.jks
+*.keystore
+
+.idea/
+*.iml
+.DS_Store
+
+*.apk
+*.ap_
+*.aab
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Local design experiments and browser profiles; not part of the public source release.
+design/
+screen-*.png

@@ -818,10 +818,10 @@ class MainActivity : ComponentActivity() {
             alertChannelGranted = backgroundLaunchStatus.alertChannelEnabled && backgroundLaunchStatus.alertChannelHighPriority,
             alertChannelText = backgroundLaunchStatus.alertChannelText(),
             fullScreenIntentGranted = backgroundLaunchStatus.fullScreenIntentAllowed,
+            miuiAutoStartGranted = backgroundLaunchStatus.autoStartAllowed(),
+            miuiAutoStartText = backgroundLaunchStatus.autoStartText(),
             miuiBackgroundPopupGranted = backgroundLaunchStatus.backgroundPopupAllowed(),
             miuiBackgroundPopupText = backgroundLaunchStatus.backgroundPopupText(),
-            miuiShowOnLockScreenGranted = backgroundLaunchStatus.showOnLockScreenAllowed(),
-            miuiShowOnLockScreenText = backgroundLaunchStatus.showOnLockScreenText(),
             backgroundLaunchGranted = backgroundLaunchStatus.likelyAllowed(),
             backgroundLaunchText = backgroundLaunchStatus.displayText(),
             exactAlarmAllowed = exactAlarm,
@@ -1120,10 +1120,10 @@ private data class DashboardState(
     val alertChannelGranted: Boolean = false,
     val alertChannelText: String = "未检测",
     val fullScreenIntentGranted: Boolean = false,
+    val miuiAutoStartGranted: Boolean = false,
+    val miuiAutoStartText: String = "未检测",
     val miuiBackgroundPopupGranted: Boolean = false,
     val miuiBackgroundPopupText: String = "未检测",
-    val miuiShowOnLockScreenGranted: Boolean = false,
-    val miuiShowOnLockScreenText: String = "未检测",
     val backgroundLaunchGranted: Boolean = false,
     val backgroundLaunchText: String = "未检测",
     val exactAlarmAllowed: Boolean = false,
@@ -2535,16 +2535,16 @@ private fun PermissionsScreen(
                     onAction = onOpenFullScreenIntentSettings
                 )
                 PermissionLine(
-                    title = "MIUI后台弹出",
-                    subtitle = dashboard.miuiBackgroundPopupText,
-                    ok = dashboard.miuiBackgroundPopupGranted,
+                    title = "MIUI自启动",
+                    subtitle = dashboard.miuiAutoStartText,
+                    ok = dashboard.miuiAutoStartGranted,
                     action = "处理",
                     onAction = onOpenMiuiPermissionSettings
                 )
                 PermissionLine(
-                    title = "MIUI锁屏显示",
-                    subtitle = dashboard.miuiShowOnLockScreenText,
-                    ok = dashboard.miuiShowOnLockScreenGranted,
+                    title = "MIUI后台弹出",
+                    subtitle = dashboard.miuiBackgroundPopupText,
+                    ok = dashboard.miuiBackgroundPopupGranted,
                     action = "处理",
                     onAction = onOpenMiuiPermissionSettings
                 )

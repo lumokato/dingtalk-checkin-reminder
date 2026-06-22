@@ -12,8 +12,8 @@ import java.lang.reflect.Method;
 
 final class BackgroundLaunchPermission {
     private static final int MODE_ALLOWED = AppOpsManager.MODE_ALLOWED;
+    private static final int MIUI_AUTO_START_OP = 10008;
     private static final int MIUI_BACKGROUND_POPUP_OP = 10021;
-    private static final int MIUI_SHOW_ON_LOCK_SCREEN_OP = 10008;
 
     private BackgroundLaunchPermission() {
     }
@@ -33,8 +33,8 @@ final class BackgroundLaunchPermission {
         boolean overlayAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || Settings.canDrawOverlays(context);
         boolean fullScreenIntentAllowed = canUseFullScreenIntent(context);
+        Integer autoStartMode = checkPrivateAppOp(context, MIUI_AUTO_START_OP);
         Integer backgroundPopupMode = checkPrivateAppOp(context, MIUI_BACKGROUND_POPUP_OP);
-        Integer showOnLockScreenMode = checkPrivateAppOp(context, MIUI_SHOW_ON_LOCK_SCREEN_OP);
         return new Status(
                 notificationsEnabled,
                 alertChannelEnabled,
@@ -42,8 +42,8 @@ final class BackgroundLaunchPermission {
                 alertChannelImportance,
                 overlayAllowed,
                 fullScreenIntentAllowed,
-                backgroundPopupMode,
-                showOnLockScreenMode
+                autoStartMode,
+                backgroundPopupMode
         );
     }
 
@@ -76,8 +76,8 @@ final class BackgroundLaunchPermission {
         final int alertChannelImportance;
         final boolean overlayAllowed;
         final boolean fullScreenIntentAllowed;
+        final Integer autoStartMode;
         final Integer backgroundPopupMode;
-        final Integer showOnLockScreenMode;
 
         Status(
                 boolean notificationsEnabled,
@@ -86,8 +86,8 @@ final class BackgroundLaunchPermission {
                 int alertChannelImportance,
                 boolean overlayAllowed,
                 boolean fullScreenIntentAllowed,
-                Integer backgroundPopupMode,
-                Integer showOnLockScreenMode
+                Integer autoStartMode,
+                Integer backgroundPopupMode
         ) {
             this.notificationsEnabled = notificationsEnabled;
             this.alertChannelEnabled = alertChannelEnabled;
@@ -95,8 +95,8 @@ final class BackgroundLaunchPermission {
             this.alertChannelImportance = alertChannelImportance;
             this.overlayAllowed = overlayAllowed;
             this.fullScreenIntentAllowed = fullScreenIntentAllowed;
+            this.autoStartMode = autoStartMode;
             this.backgroundPopupMode = backgroundPopupMode;
-            this.showOnLockScreenMode = showOnLockScreenMode;
         }
 
         boolean likelyAllowed() {
@@ -104,16 +104,16 @@ final class BackgroundLaunchPermission {
                     && alertChannelEnabled
                     && alertChannelHighPriority
                     && fullScreenIntentAllowed
-                    && backgroundPopupAllowed()
-                    && showOnLockScreenAllowed();
+                    && autoStartAllowed()
+                    && backgroundPopupAllowed();
+        }
+
+        boolean autoStartAllowed() {
+            return modeAllowedOrUnknown(autoStartMode);
         }
 
         boolean backgroundPopupAllowed() {
             return modeAllowedOrUnknown(backgroundPopupMode);
-        }
-
-        boolean showOnLockScreenAllowed() {
-            return modeAllowedOrUnknown(showOnLockScreenMode);
         }
 
         String alertChannelText() {
@@ -126,12 +126,12 @@ final class BackgroundLaunchPermission {
             return "高优先级";
         }
 
-        String backgroundPopupText() {
-            return appOpDisplayText(backgroundPopupMode);
+        String autoStartText() {
+            return appOpDisplayText(autoStartMode);
         }
 
-        String showOnLockScreenText() {
-            return appOpDisplayText(showOnLockScreenMode);
+        String backgroundPopupText() {
+            return appOpDisplayText(backgroundPopupMode);
         }
 
         String logText() {
@@ -141,8 +141,8 @@ final class BackgroundLaunchPermission {
                     + " alertChannelHighPriority=" + alertChannelHighPriority
                     + " overlayAllowed=" + overlayAllowed
                     + " fullScreenIntentAllowed=" + fullScreenIntentAllowed
+                    + " miuiAutoStart=" + modeText(autoStartMode)
                     + " miuiBackgroundPopup=" + modeText(backgroundPopupMode)
-                    + " miuiShowOnLockScreen=" + modeText(showOnLockScreenMode)
                     + " likelyAllowed=" + likelyAllowed();
         }
 
@@ -162,8 +162,11 @@ final class BackgroundLaunchPermission {
             if (!fullScreenIntentAllowed) {
                 return "全屏通知未放行";
             }
-            if (!backgroundPopupAllowed() || !showOnLockScreenAllowed()) {
-                return "后台弹出未放行";
+            if (!autoStartAllowed()) {
+                return "MIUI自启动未放行";
+            }
+            if (!backgroundPopupAllowed()) {
+                return "MIUI后台弹出未放行";
             }
             return "未完全放行";
         }

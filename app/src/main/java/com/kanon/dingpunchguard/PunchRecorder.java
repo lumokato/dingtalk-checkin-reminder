@@ -79,10 +79,14 @@ final class PunchRecorder {
     }
 
     static boolean looksLikeDingTalkPunchSuccess(Context context, String text) {
+        return looksLikeDingTalkPunchSuccess(text, recentVerifiedDingForeground(context));
+    }
+
+    static boolean looksLikeDingTalkPunchSuccess(String text, boolean recentVerifiedForeground) {
         String normalized = normalize(text);
         return successKeyword(normalized)
                 && !failureKeyword(normalized)
-                && (strongPunchContext(normalized) || recentVerifiedDingForeground(context));
+                && (strongPunchContext(normalized) || recentVerifiedForeground);
     }
 
     static String dingTalkSuccessDebug(Context context, String text) {
@@ -97,8 +101,21 @@ final class PunchRecorder {
     }
 
     private static boolean successKeyword(String normalized) {
-        return containsAny(normalized, "打卡成功", "成功打卡", "已成功打卡", "已打卡", "考勤成功", "签到成功", "签退成功")
-                || (normalized.contains("极速打卡") && normalized.contains("成功"));
+        return containsAny(
+                normalized,
+                "打卡成功",
+                "成功打卡",
+                "已成功打卡",
+                "已打卡",
+                "已完成打卡",
+                "打卡已完成",
+                "已为你打卡",
+                "已为你完成打卡",
+                "考勤成功",
+                "签到成功",
+                "签退成功"
+        ) || (normalized.contains("极速打卡")
+                && containsAny(normalized, "成功", "已打卡", "已完成", "完成打卡"));
     }
 
     private static boolean strongPunchContext(String normalized) {

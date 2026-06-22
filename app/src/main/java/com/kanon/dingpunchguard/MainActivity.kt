@@ -14,6 +14,7 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
@@ -149,12 +150,13 @@ class MainActivity : ComponentActivity() {
                     onRequestPermissions = { requestCorePermissions() },
                     onOpenLocationSettings = { openLocationPermissionSettings() },
                     onOpenNotificationListener = { openNotificationListenerSettings() },
+                    onOpenAccessibilitySettings = { openAccessibilitySettings() },
                     onOpenUsageAccessSettings = { openUsageAccessSettings() },
                     onOpenAppNotificationSettings = { openAppNotificationSettings() },
                     onOpenAlertChannelSettings = { openAlertChannelSettings() },
-                    onOpenFullScreenIntentSettings = { openFullScreenIntentSettings() },
+                    onOpenOverlaySettings = { openOverlaySettings() },
                     onOpenMiuiPermissionSettings = { openMiuiPermissionSettings() },
-                    onRequestExactAlarm = { requestExactAlarmIfNeeded() },
+                    onRequestExactAlarm = { requestExactAlarmIfNeeded(showAlreadyAllowedToast = true) },
                     onOpenBatterySettings = { openBatterySettings() },
                     onOpenAppSettings = { openAppSettings() },
                     onRefreshLocation = { refreshCurrentLocation() },
@@ -405,17 +407,19 @@ class MainActivity : ComponentActivity() {
                 openLocationPermissionSettings()
             }
         }
-        requestExactAlarmIfNeeded()
+        requestExactAlarmIfNeeded(showAlreadyAllowedToast = false)
         refreshDashboard()
     }
 
-    private fun requestExactAlarmIfNeeded() {
+    private fun requestExactAlarmIfNeeded(showAlreadyAllowedToast: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             return
         }
         val alarmManager = getSystemService(AlarmManager::class.java)
         if (alarmManager.canScheduleExactAlarms()) {
-            Toast.makeText(this, "准时提醒权限已可用", Toast.LENGTH_SHORT).show()
+            if (showAlreadyAllowedToast) {
+                Toast.makeText(this, "准时提醒权限已可用", Toast.LENGTH_SHORT).show()
+            }
             return
         }
         try {
@@ -501,13 +505,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestDingTalkLaunch() {
-        AppLog.i(this, "DingTalk launch requested from activity through guard service")
-        startGuardService(Config.ACTION_OPEN_DING)
+        AppLog.i(this, "DingTalk background launch test requested from activity; moving task to back")
+        moveTaskToBack(true)
+        Handler(Looper.getMainLooper()).postDelayed({
+            AppLog.i(this, "DingTalk launch requested after activity moved to background through guard service")
+            startGuardService(Config.ACTION_OPEN_DING)
+        }, 700L)
     }
 
     private fun openNotificationListenerSettings() {
         try {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        } catch (_: Exception) {
+            openAppSettings()
+        }
+    }
+
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         } catch (_: Exception) {
             openAppSettings()
         }
@@ -567,21 +583,6 @@ class MainActivity : ComponentActivity() {
         openAppNotificationSettings()
     }
 
-    private fun openFullScreenIntentSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            if (tryStartActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-            ) {
-                return
-            }
-        }
-        openAppNotificationSettings()
-    }
-
     private fun openMiuiPermissionSettings() {
         if (openMiuiPermissionEditor()) {
             return
@@ -591,25 +592,9 @@ class MainActivity : ComponentActivity() {
 
     private fun openBackgroundLaunchSettings() {
         val status = BackgroundLaunchPermission.status(this)
-        if (!status.notificationsEnabled) {
-            openAppNotificationSettings()
+        if (!status.overlayAllowed) {
+            openOverlaySettings()
             return
-        }
-        if (!status.alertChannelEnabled || !status.alertChannelHighPriority) {
-            openAlertChannelSettings()
-            return
-        }
-        if (!status.fullScreenIntentAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            try {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-                return
-            } catch (_: Exception) {
-            }
         }
         if (openMiuiPermissionEditor()) {
             return
@@ -703,6 +688,7 @@ class MainActivity : ComponentActivity() {
             getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
         val notificationGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val accessibilityEnabled = isDingTalkAccessibilityObserverEnabled()
         val usageStatsGranted = ForegroundAppVerifier.hasUsageStatsAccess(this)
         val backgroundLaunchStatus = BackgroundLaunchPermission.status(this)
         val dingTalkInstalled = packageManager.getLaunchIntentForPackage(Config.DINGTALK_PACKAGE) != null
@@ -724,8 +710,8 @@ class MainActivity : ComponentActivity() {
         if (!notificationGranted) {
             warnings.add("通知权限未授权，强提醒和确认按钮可能不可见。")
         }
-        if (!isDingTalkNotificationListenerEnabled()) {
-            warnings.add("未开启成功通知识别，无法根据钉钉成功通知自动记录。")
+        if (!accessibilityEnabled) {
+            warnings.add("未开启钉钉内部提示识别，极速打卡成功弹层无法自动记录。")
         }
         if (Config.assumeDingTalkOpenMeansSuccess(this) && !usageStatsGranted) {
             warnings.add("前台兜底记录需要前台验证权限，否则不能确认钉钉是否真的打开。")
@@ -813,11 +799,13 @@ class MainActivity : ComponentActivity() {
             backgroundLocationGranted = hasBackgroundLocationPermission(),
             notificationGranted = notificationGranted,
             notificationListenerEnabled = isDingTalkNotificationListenerEnabled(),
+            accessibilityObserverEnabled = accessibilityEnabled,
             usageStatsGranted = usageStatsGranted,
             notificationSwitchGranted = backgroundLaunchStatus.notificationsEnabled,
             alertChannelGranted = backgroundLaunchStatus.alertChannelEnabled && backgroundLaunchStatus.alertChannelHighPriority,
             alertChannelText = backgroundLaunchStatus.alertChannelText(),
-            fullScreenIntentGranted = backgroundLaunchStatus.fullScreenIntentAllowed,
+            overlayGranted = backgroundLaunchStatus.overlayAllowed,
+            overlayText = backgroundLaunchStatus.overlayText(),
             miuiAutoStartGranted = backgroundLaunchStatus.autoStartAllowed(),
             miuiAutoStartText = backgroundLaunchStatus.autoStartText(),
             miuiBackgroundPopupGranted = backgroundLaunchStatus.backgroundPopupAllowed(),
@@ -1012,6 +1000,21 @@ class MainActivity : ComponentActivity() {
         return enabled.lowercase(Locale.US).contains(expected)
     }
 
+    private fun isDingTalkAccessibilityObserverEnabled(): Boolean {
+        val accessibilityEnabled = Settings.Secure.getInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
+        if (!accessibilityEnabled) {
+            return false
+        }
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        if (enabled.isNullOrBlank()) {
+            return false
+        }
+        val expected = ComponentName(this, DingTalkAccessibilityObserver::class.java)
+            .flattenToString()
+            .lowercase(Locale.US)
+        return enabled.lowercase(Locale.US).contains(expected)
+    }
+
     private fun formatMillis(millis: Long): String {
         return DateTimeFormatter.ofPattern("HH:mm").format(
             LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
@@ -1115,11 +1118,13 @@ private data class DashboardState(
     val backgroundLocationGranted: Boolean = false,
     val notificationGranted: Boolean = false,
     val notificationListenerEnabled: Boolean = false,
+    val accessibilityObserverEnabled: Boolean = false,
     val usageStatsGranted: Boolean = false,
     val notificationSwitchGranted: Boolean = false,
     val alertChannelGranted: Boolean = false,
     val alertChannelText: String = "未检测",
-    val fullScreenIntentGranted: Boolean = false,
+    val overlayGranted: Boolean = false,
+    val overlayText: String = "未检测",
     val miuiAutoStartGranted: Boolean = false,
     val miuiAutoStartText: String = "未检测",
     val miuiBackgroundPopupGranted: Boolean = false,
@@ -1193,10 +1198,11 @@ private fun DingPunchApp(
     onRequestPermissions: () -> Unit,
     onOpenLocationSettings: () -> Unit,
     onOpenNotificationListener: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
     onOpenAppNotificationSettings: () -> Unit,
     onOpenAlertChannelSettings: () -> Unit,
-    onOpenFullScreenIntentSettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
     onOpenMiuiPermissionSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -1270,10 +1276,11 @@ private fun DingPunchApp(
                     onRequestPermissions = onRequestPermissions,
                     onOpenLocationSettings = onOpenLocationSettings,
                     onOpenNotificationListener = onOpenNotificationListener,
+                    onOpenAccessibilitySettings = onOpenAccessibilitySettings,
                     onOpenUsageAccessSettings = onOpenUsageAccessSettings,
                     onOpenAppNotificationSettings = onOpenAppNotificationSettings,
                     onOpenAlertChannelSettings = onOpenAlertChannelSettings,
-                    onOpenFullScreenIntentSettings = onOpenFullScreenIntentSettings,
+                    onOpenOverlaySettings = onOpenOverlaySettings,
                     onOpenMiuiPermissionSettings = onOpenMiuiPermissionSettings,
                     onRequestExactAlarm = onRequestExactAlarm,
                     onOpenBatterySettings = onOpenBatterySettings,
@@ -1691,6 +1698,7 @@ private fun homeLocationValueLineHeight(fontSize: TextUnit, large: Boolean): Tex
 @Composable
 private fun HomeStatusGrid(dashboard: DashboardState, profile: HomeLayoutProfile) {
     val recognition = when {
+        dashboard.accessibilityObserverEnabled -> "内部提示识别"
         dashboard.notificationListenerEnabled -> "可自动记录"
         dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "前台后记录"
         dashboard.dingTalkInstalled -> "可打开钉钉"
@@ -1728,6 +1736,7 @@ private fun HomeStatusGrid(dashboard: DashboardState, profile: HomeLayoutProfile
                 title = "成功识别",
                 value = recognition,
                 meta = when {
+                    dashboard.accessibilityObserverEnabled -> "极速打卡提示"
                     dashboard.notificationListenerEnabled -> "钉钉通知确认"
                     dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "验证前台后记录"
                     dashboard.assumeOpenSuccess -> "缺少前台验证"
@@ -2455,10 +2464,11 @@ private fun PermissionsScreen(
     onRequestPermissions: () -> Unit,
     onOpenLocationSettings: () -> Unit,
     onOpenNotificationListener: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
     onOpenAppNotificationSettings: () -> Unit,
     onOpenAlertChannelSettings: () -> Unit,
-    onOpenFullScreenIntentSettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
     onOpenMiuiPermissionSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -2468,6 +2478,15 @@ private fun PermissionsScreen(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 380.dp
+        val notificationReady = dashboard.notificationGranted &&
+            dashboard.notificationSwitchGranted &&
+            dashboard.alertChannelGranted
+        val notificationText = when {
+            !dashboard.notificationGranted -> "未授权，兜底提醒不可见"
+            !dashboard.notificationSwitchGranted -> "系统通知被关闭"
+            !dashboard.alertChannelGranted -> dashboard.alertChannelText
+            else -> "可用"
+        }
         ScreenColumn(
             horizontalPadding = if (compact) 10.dp else 12.dp,
             verticalPadding = if (compact) 8.dp else 10.dp,
@@ -2489,32 +2508,32 @@ private fun PermissionsScreen(
                     onAction = onOpenLocationSettings
                 )
                 PermissionLine(
-                    title = "通知权限",
-                    subtitle = if (dashboard.notificationGranted) "已授权" else "强提醒需要通知权限",
-                    ok = dashboard.notificationGranted,
+                    title = "通知提醒",
+                    subtitle = notificationText,
+                    ok = notificationReady,
                     action = "处理",
-                    onAction = onRequestPermissions
+                    onAction = if (dashboard.notificationGranted) onOpenAppNotificationSettings else onRequestPermissions
                 )
                 PermissionLine(
-                    title = "通知总开关",
-                    subtitle = if (dashboard.notificationSwitchGranted) "已开启" else "系统通知被关闭",
-                    ok = dashboard.notificationSwitchGranted,
+                    title = "悬浮窗/后台显示",
+                    subtitle = dashboard.overlayText,
+                    ok = dashboard.overlayGranted,
                     action = "处理",
-                    onAction = onOpenAppNotificationSettings
-                )
-                PermissionLine(
-                    title = "强提醒渠道",
-                    subtitle = dashboard.alertChannelText,
-                    ok = dashboard.alertChannelGranted,
-                    action = "处理",
-                    onAction = onOpenAlertChannelSettings
+                    onAction = onOpenOverlaySettings
                 )
                 PermissionLine(
                     title = "识别钉钉成功通知",
-                    subtitle = if (dashboard.notificationListenerEnabled) "已启用" else "用于自动记录钉钉打卡成功",
+                    subtitle = if (dashboard.notificationListenerEnabled) "已启用" else "仅识别系统通知，不识别内部弹层",
                     ok = dashboard.notificationListenerEnabled,
                     action = "处理",
                     onAction = onOpenNotificationListener
+                )
+                PermissionLine(
+                    title = "识别钉钉内部提示",
+                    subtitle = if (dashboard.accessibilityObserverEnabled) "已启用" else "用于极速打卡成功弹层",
+                    ok = dashboard.accessibilityObserverEnabled,
+                    action = "处理",
+                    onAction = onOpenAccessibilitySettings
                 )
                 PermissionLine(
                     title = "前台验证",
@@ -2522,17 +2541,6 @@ private fun PermissionsScreen(
                     ok = dashboard.usageStatsGranted,
                     action = "处理",
                     onAction = onOpenUsageAccessSettings
-                )
-                PermissionLine(
-                    title = "全屏通知",
-                    subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        if (dashboard.fullScreenIntentGranted) "已允许" else "未允许，后台拉起会被拦截"
-                    } else {
-                        "系统不需要单独授权"
-                    },
-                    ok = dashboard.fullScreenIntentGranted,
-                    action = "处理",
-                    onAction = onOpenFullScreenIntentSettings
                 )
                 PermissionLine(
                     title = "MIUI自启动",
@@ -2608,7 +2616,14 @@ private fun PermissionsScreen(
             })
             InfoCard(title = "可靠性判断", icon = Icons.Filled.Info) {
                 StatusLine("目标地点", if (dashboard.targetConfigured) "已配置" else "未配置")
-                StatusLine("成功识别", if (dashboard.notificationListenerEnabled) "可识别钉钉成功通知" else "只能提醒或手动确认")
+                StatusLine(
+                    "成功识别",
+                    when {
+                        dashboard.accessibilityObserverEnabled -> "可识别钉钉内部提示"
+                        dashboard.notificationListenerEnabled -> "可识别钉钉系统通知"
+                        else -> "只能提醒或手动确认"
+                    }
+                )
                 StatusLine(
                     "前台兜底记录",
                     when {

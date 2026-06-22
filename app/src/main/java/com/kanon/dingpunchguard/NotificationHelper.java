@@ -118,42 +118,21 @@ final class NotificationHelper {
 
     static boolean postDingTalkLaunchRequest(Context context, String title, String text, String confirmAction) {
         ensureChannels(context);
-        PendingIntent dingTalkPendingIntent = dingTalkFullScreenPendingIntentOrNull(context, 41);
+        PendingIntent dingTalkPendingIntent = dingTalkActivityPendingIntentOrNull(context, 41);
         if (dingTalkPendingIntent == null) {
             postAlert(context, "没有找到钉钉", "未安装钉钉，或系统不允许查询钉钉包名。", confirmAction);
             return false;
         }
-        PendingIntent openThroughServicePendingIntent = openDingTalkServicePendingIntent(context, 43);
-
-        Notification.Builder builder = new Notification.Builder(context)
-                .setSmallIcon(R.drawable.ic_stat_punch)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setStyle(new Notification.BigTextStyle().bigText(text))
-                .setContentIntent(openThroughServicePendingIntent)
-                .setFullScreenIntent(dingTalkPendingIntent, true)
-                .setAutoCancel(false)
-                .setOngoing(true)
-                .setShowWhen(true)
-                .setOnlyAlertOnce(false)
-                .setCategory(Notification.CATEGORY_ALARM)
-                .addAction(R.drawable.ic_stat_punch, "打开钉钉", openThroughServicePendingIntent);
-
-        if (confirmAction != null) {
-            String label = Config.ACTION_CONFIRM_CHECKIN.equals(confirmAction) ? "已上班打卡" : "已下班打卡";
-            builder.addAction(R.drawable.ic_stat_punch, label, servicePendingIntent(context, 42, confirmAction));
+        if (sendDingTalkActivityPendingIntent(context, dingTalkPendingIntent)) {
+            return true;
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder.setChannelId(ALERT_CHANNEL_ID);
-        } else {
-            builder.setPriority(Notification.PRIORITY_MAX);
-            builder.setVibrate(new long[]{0, 500, 250, 500});
-        }
-
-        NotificationManager manager = context.getSystemService(NotificationManager.class);
-        manager.notify(Config.ALERT_NOTIFICATION_ID, builder.build());
-        return true;
+        postAlert(
+                context,
+                title,
+                text + " 系统没有接受直接打开请求，请点通知手动打开钉钉。",
+                confirmAction
+        );
+        return false;
     }
 
     static void cancelAlert(Context context) {
@@ -222,7 +201,7 @@ final class NotificationHelper {
         return servicePendingIntent(context, requestCode, Config.ACTION_OPEN_DING);
     }
 
-    private static PendingIntent dingTalkFullScreenPendingIntentOrNull(Context context, int requestCode) {
+    private static PendingIntent dingTalkActivityPendingIntentOrNull(Context context, int requestCode) {
         Intent intent = context.getPackageManager().getLaunchIntentForPackage(Config.DINGTALK_PACKAGE);
         if (intent == null) {
             return null;
@@ -233,16 +212,40 @@ final class NotificationHelper {
                 requestCode,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE,
-                backgroundLaunchOptions()
+                pendingIntentCreatorOptions()
         );
     }
 
-    private static Bundle backgroundLaunchOptions() {
+    private static boolean sendDingTalkActivityPendingIntent(Context context, PendingIntent pendingIntent) {
+        try {
+            pendingIntent.send(context, 0, null, null, null, null, pendingIntentSenderOptions());
+            AppLog.i(context, "DingTalk activity pending intent sent with background launch options");
+            return true;
+        } catch (PendingIntent.CanceledException e) {
+            AppLog.e(context, "DingTalk activity pending intent was canceled", e);
+        } catch (RuntimeException e) {
+            AppLog.e(context, "DingTalk activity pending intent send failed", e);
+        }
+        return false;
+    }
+
+    private static Bundle pendingIntentCreatorOptions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             return null;
         }
         ActivityOptions options = ActivityOptions.makeBasic();
         options.setPendingIntentCreatorBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+        );
+        return options.toBundle();
+    }
+
+    private static Bundle pendingIntentSenderOptions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            return null;
+        }
+        ActivityOptions options = ActivityOptions.makeBasic();
+        options.setPendingIntentBackgroundActivityStartMode(
                 ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
         );
         return options.toBundle();

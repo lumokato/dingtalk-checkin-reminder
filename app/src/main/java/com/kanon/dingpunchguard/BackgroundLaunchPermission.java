@@ -32,7 +32,6 @@ final class BackgroundLaunchPermission {
         boolean alertChannelHighPriority = alertChannelImportance >= NotificationManager.IMPORTANCE_HIGH;
         boolean overlayAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || Settings.canDrawOverlays(context);
-        boolean fullScreenIntentAllowed = canUseFullScreenIntent(context);
         Integer autoStartMode = checkPrivateAppOp(context, MIUI_AUTO_START_OP);
         Integer backgroundPopupMode = checkPrivateAppOp(context, MIUI_BACKGROUND_POPUP_OP);
         return new Status(
@@ -41,18 +40,9 @@ final class BackgroundLaunchPermission {
                 alertChannelHighPriority,
                 alertChannelImportance,
                 overlayAllowed,
-                fullScreenIntentAllowed,
                 autoStartMode,
                 backgroundPopupMode
         );
-    }
-
-    private static boolean canUseFullScreenIntent(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            return true;
-        }
-        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
-        return notificationManager != null && notificationManager.canUseFullScreenIntent();
     }
 
     private static Integer checkPrivateAppOp(Context context, int op) {
@@ -75,7 +65,6 @@ final class BackgroundLaunchPermission {
         final boolean alertChannelHighPriority;
         final int alertChannelImportance;
         final boolean overlayAllowed;
-        final boolean fullScreenIntentAllowed;
         final Integer autoStartMode;
         final Integer backgroundPopupMode;
 
@@ -85,7 +74,6 @@ final class BackgroundLaunchPermission {
                 boolean alertChannelHighPriority,
                 int alertChannelImportance,
                 boolean overlayAllowed,
-                boolean fullScreenIntentAllowed,
                 Integer autoStartMode,
                 Integer backgroundPopupMode
         ) {
@@ -94,16 +82,12 @@ final class BackgroundLaunchPermission {
             this.alertChannelHighPriority = alertChannelHighPriority;
             this.alertChannelImportance = alertChannelImportance;
             this.overlayAllowed = overlayAllowed;
-            this.fullScreenIntentAllowed = fullScreenIntentAllowed;
             this.autoStartMode = autoStartMode;
             this.backgroundPopupMode = backgroundPopupMode;
         }
 
         boolean likelyAllowed() {
-            return notificationsEnabled
-                    && alertChannelEnabled
-                    && alertChannelHighPriority
-                    && fullScreenIntentAllowed
+            return overlayAllowed
                     && autoStartAllowed()
                     && backgroundPopupAllowed();
         }
@@ -126,6 +110,10 @@ final class BackgroundLaunchPermission {
             return "高优先级";
         }
 
+        String overlayText() {
+            return overlayAllowed ? "已允许" : "未允许，后台拉起会被系统拦截";
+        }
+
         String autoStartText() {
             return appOpDisplayText(autoStartMode);
         }
@@ -140,7 +128,6 @@ final class BackgroundLaunchPermission {
                     + " alertChannelImportance=" + alertChannelImportance
                     + " alertChannelHighPriority=" + alertChannelHighPriority
                     + " overlayAllowed=" + overlayAllowed
-                    + " fullScreenIntentAllowed=" + fullScreenIntentAllowed
                     + " miuiAutoStart=" + modeText(autoStartMode)
                     + " miuiBackgroundPopup=" + modeText(backgroundPopupMode)
                     + " likelyAllowed=" + likelyAllowed();
@@ -150,17 +137,8 @@ final class BackgroundLaunchPermission {
             if (likelyAllowed()) {
                 return "已放行";
             }
-            if (!notificationsEnabled) {
-                return "通知总开关未放行";
-            }
-            if (!alertChannelEnabled) {
-                return "强提醒渠道已关闭";
-            }
-            if (!alertChannelHighPriority) {
-                return "强提醒不是高优先级";
-            }
-            if (!fullScreenIntentAllowed) {
-                return "全屏通知未放行";
+            if (!overlayAllowed) {
+                return "悬浮窗/后台显示未放行";
             }
             if (!autoStartAllowed()) {
                 return "MIUI自启动未放行";

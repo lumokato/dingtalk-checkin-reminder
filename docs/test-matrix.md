@@ -14,6 +14,8 @@
 - 覆盖安装后需重新核对后台拉起相关状态；HyperOS 可能把私有开关重置为 `ignore`，用户也可能把通知渠道降级成静默。
 - 日志：`/sdcard/Android/data/com.kanon.dingpunchguard/files/guard-events.log`。
 - 前台按钮、状态通知和强提醒通知里的“打开钉钉”必须走守护服务统一拉起通道，不能直接 `Activity.startActivity()` 或直接钉钉 `PendingIntent`，避免前台或手动入口成功掩盖后台路径失败。
+- 守护服务打开钉钉时必须主动发送钉钉 Activity `PendingIntent`，并带后台 Activity 启动 opt-in；full-screen notification 只能作为兜底，不应是唯一拉起动作。
+- “测试钉钉”按钮必须先把本应用退到后台，再延迟触发守护服务；日志里的 `appForeground` 应为 `false`。
 
 ## 真实场景轴
 

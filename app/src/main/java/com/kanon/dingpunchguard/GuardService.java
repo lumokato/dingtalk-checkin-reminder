@@ -132,7 +132,6 @@ public class GuardService extends Service {
                 verifyDingTalkForegroundAfterLaunch(phase, openMillis, false);
                 maybeRecordAssumedOpenSuccess(phase, openMillis);
             }
-            maybePostCurrentPhaseAlert(true);
             if (currentPhase(this) == PHASE_IDLE) {
                 handler.postDelayed(this::stopEverything, 1_000L);
                 return START_NOT_STICKY;
@@ -364,7 +363,10 @@ public class GuardService extends Service {
                         Config.placeName(this),
                         Config.radiusMeters(this),
                         autoOpenReady ? "正在打开钉钉；若未成功，请点通知手动打开。" : "解锁手机后会继续尝试打开钉钉。");
-                maybeAlert(forceAlert, "上班打卡", text, Config.ACTION_CONFIRM_CHECKIN);
+                if (action != GuardDecisionEngine.CheckInAction.INSIDE_OPEN_DINGTALK
+                        || !ForegroundAppVerifier.hasUsageStatsAccess(this)) {
+                    maybeAlert(forceAlert, "上班打卡", text, Config.ACTION_CONFIRM_CHECKIN);
+                }
                 if (action == GuardDecisionEngine.CheckInAction.INSIDE_OPEN_DINGTALK) {
                     maybeOpenDingTalk(forceAlert || becameAutoOpenReady);
                 }
@@ -411,7 +413,9 @@ public class GuardService extends Service {
             case OPEN_DINGTALK:
                 AppLog.i(this, "check-out ready action=" + action + " device=" + device.logText() + " becameAutoOpenReady=" + becameAutoOpenReady);
                 maybeOpenDingTalk(forceAlert || becameAutoOpenReady);
-                postCheckoutConfirmAlertOnce();
+                if (!Config.assumeDingTalkOpenMeansSuccess(this)) {
+                    postCheckoutConfirmAlertOnce();
+                }
         }
     }
 
@@ -468,15 +472,6 @@ public class GuardService extends Service {
         AppLog.i(this, "unlocked probe started reason=" + reason);
         startUnlockBurst(UNLOCK_PROBE_MILLIS, reason);
         return true;
-    }
-
-    private void maybePostCurrentPhaseAlert(boolean force) {
-        int phase = lastPhase == PHASE_IDLE ? currentPhase(this) : lastPhase;
-        if (phase == PHASE_CHECKIN) {
-            maybeAlert(force, "上班打卡", "请确认是否已经完成上班打卡。", Config.ACTION_CONFIRM_CHECKIN);
-        } else if (phase == PHASE_CHECKOUT) {
-            maybeAlert(force, "下班打卡", "请确认是否已经完成下班打卡。", Config.ACTION_CONFIRM_CHECKOUT);
-        }
     }
 
     private void maybeAlert(boolean force, String title, String text, String confirmAction) {
@@ -661,7 +656,7 @@ public class GuardService extends Service {
         if (posted) {
             long now = System.currentTimeMillis();
             Config.markDingTalkOpened(this, now);
-            AppLog.i(this, "DingTalk launch requested through notification pending intent appForeground="
+            AppLog.i(this, "DingTalk launch requested through background activity pending intent appForeground="
                     + appForeground
                     + " "
                     + backgroundLaunchStatus.logText());

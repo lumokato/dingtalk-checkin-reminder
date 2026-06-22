@@ -150,8 +150,10 @@ class MainActivity : ComponentActivity() {
                     onOpenLocationSettings = { openLocationPermissionSettings() },
                     onOpenNotificationListener = { openNotificationListenerSettings() },
                     onOpenUsageAccessSettings = { openUsageAccessSettings() },
-                    onOpenOverlaySettings = { openOverlaySettings() },
-                    onOpenBackgroundLaunchSettings = { openBackgroundLaunchSettings() },
+                    onOpenAppNotificationSettings = { openAppNotificationSettings() },
+                    onOpenAlertChannelSettings = { openAlertChannelSettings() },
+                    onOpenFullScreenIntentSettings = { openFullScreenIntentSettings() },
+                    onOpenMiuiPermissionSettings = { openMiuiPermissionSettings() },
                     onRequestExactAlarm = { requestExactAlarmIfNeeded() },
                     onOpenBatterySettings = { openBatterySettings() },
                     onOpenAppSettings = { openAppSettings() },
@@ -565,6 +567,28 @@ class MainActivity : ComponentActivity() {
         openAppNotificationSettings()
     }
 
+    private fun openFullScreenIntentSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (tryStartActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            ) {
+                return
+            }
+        }
+        openAppNotificationSettings()
+    }
+
+    private fun openMiuiPermissionSettings() {
+        if (openMiuiPermissionEditor()) {
+            return
+        }
+        openAppSettings()
+    }
+
     private fun openBackgroundLaunchSettings() {
         val status = BackgroundLaunchPermission.status(this)
         if (!status.notificationsEnabled) {
@@ -790,6 +814,14 @@ class MainActivity : ComponentActivity() {
             notificationGranted = notificationGranted,
             notificationListenerEnabled = isDingTalkNotificationListenerEnabled(),
             usageStatsGranted = usageStatsGranted,
+            notificationSwitchGranted = backgroundLaunchStatus.notificationsEnabled,
+            alertChannelGranted = backgroundLaunchStatus.alertChannelEnabled && backgroundLaunchStatus.alertChannelHighPriority,
+            alertChannelText = backgroundLaunchStatus.alertChannelText(),
+            fullScreenIntentGranted = backgroundLaunchStatus.fullScreenIntentAllowed,
+            miuiBackgroundPopupGranted = backgroundLaunchStatus.backgroundPopupAllowed(),
+            miuiBackgroundPopupText = backgroundLaunchStatus.backgroundPopupText(),
+            miuiShowOnLockScreenGranted = backgroundLaunchStatus.showOnLockScreenAllowed(),
+            miuiShowOnLockScreenText = backgroundLaunchStatus.showOnLockScreenText(),
             backgroundLaunchGranted = backgroundLaunchStatus.likelyAllowed(),
             backgroundLaunchText = backgroundLaunchStatus.displayText(),
             exactAlarmAllowed = exactAlarm,
@@ -1084,6 +1116,14 @@ private data class DashboardState(
     val notificationGranted: Boolean = false,
     val notificationListenerEnabled: Boolean = false,
     val usageStatsGranted: Boolean = false,
+    val notificationSwitchGranted: Boolean = false,
+    val alertChannelGranted: Boolean = false,
+    val alertChannelText: String = "未检测",
+    val fullScreenIntentGranted: Boolean = false,
+    val miuiBackgroundPopupGranted: Boolean = false,
+    val miuiBackgroundPopupText: String = "未检测",
+    val miuiShowOnLockScreenGranted: Boolean = false,
+    val miuiShowOnLockScreenText: String = "未检测",
     val backgroundLaunchGranted: Boolean = false,
     val backgroundLaunchText: String = "未检测",
     val exactAlarmAllowed: Boolean = false,
@@ -1154,8 +1194,10 @@ private fun DingPunchApp(
     onOpenLocationSettings: () -> Unit,
     onOpenNotificationListener: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
-    onOpenOverlaySettings: () -> Unit,
-    onOpenBackgroundLaunchSettings: () -> Unit,
+    onOpenAppNotificationSettings: () -> Unit,
+    onOpenAlertChannelSettings: () -> Unit,
+    onOpenFullScreenIntentSettings: () -> Unit,
+    onOpenMiuiPermissionSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
@@ -1229,8 +1271,10 @@ private fun DingPunchApp(
                     onOpenLocationSettings = onOpenLocationSettings,
                     onOpenNotificationListener = onOpenNotificationListener,
                     onOpenUsageAccessSettings = onOpenUsageAccessSettings,
-                    onOpenOverlaySettings = onOpenOverlaySettings,
-                    onOpenBackgroundLaunchSettings = onOpenBackgroundLaunchSettings,
+                    onOpenAppNotificationSettings = onOpenAppNotificationSettings,
+                    onOpenAlertChannelSettings = onOpenAlertChannelSettings,
+                    onOpenFullScreenIntentSettings = onOpenFullScreenIntentSettings,
+                    onOpenMiuiPermissionSettings = onOpenMiuiPermissionSettings,
                     onRequestExactAlarm = onRequestExactAlarm,
                     onOpenBatterySettings = onOpenBatterySettings,
                     onOpenAppSettings = onOpenAppSettings,
@@ -2412,8 +2456,10 @@ private fun PermissionsScreen(
     onOpenLocationSettings: () -> Unit,
     onOpenNotificationListener: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
-    onOpenOverlaySettings: () -> Unit,
-    onOpenBackgroundLaunchSettings: () -> Unit,
+    onOpenAppNotificationSettings: () -> Unit,
+    onOpenAlertChannelSettings: () -> Unit,
+    onOpenFullScreenIntentSettings: () -> Unit,
+    onOpenMiuiPermissionSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
@@ -2450,6 +2496,20 @@ private fun PermissionsScreen(
                     onAction = onRequestPermissions
                 )
                 PermissionLine(
+                    title = "通知总开关",
+                    subtitle = if (dashboard.notificationSwitchGranted) "已开启" else "系统通知被关闭",
+                    ok = dashboard.notificationSwitchGranted,
+                    action = "处理",
+                    onAction = onOpenAppNotificationSettings
+                )
+                PermissionLine(
+                    title = "强提醒渠道",
+                    subtitle = dashboard.alertChannelText,
+                    ok = dashboard.alertChannelGranted,
+                    action = "处理",
+                    onAction = onOpenAlertChannelSettings
+                )
+                PermissionLine(
                     title = "识别钉钉成功通知",
                     subtitle = if (dashboard.notificationListenerEnabled) "已启用" else "用于自动记录钉钉打卡成功",
                     ok = dashboard.notificationListenerEnabled,
@@ -2464,11 +2524,29 @@ private fun PermissionsScreen(
                     onAction = onOpenUsageAccessSettings
                 )
                 PermissionLine(
-                    title = "后台拉起",
-                    subtitle = dashboard.backgroundLaunchText,
-                    ok = dashboard.backgroundLaunchGranted,
+                    title = "全屏通知",
+                    subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        if (dashboard.fullScreenIntentGranted) "已允许" else "未允许，后台拉起会被拦截"
+                    } else {
+                        "系统不需要单独授权"
+                    },
+                    ok = dashboard.fullScreenIntentGranted,
                     action = "处理",
-                    onAction = onOpenBackgroundLaunchSettings
+                    onAction = onOpenFullScreenIntentSettings
+                )
+                PermissionLine(
+                    title = "MIUI后台弹出",
+                    subtitle = dashboard.miuiBackgroundPopupText,
+                    ok = dashboard.miuiBackgroundPopupGranted,
+                    action = "处理",
+                    onAction = onOpenMiuiPermissionSettings
+                )
+                PermissionLine(
+                    title = "MIUI锁屏显示",
+                    subtitle = dashboard.miuiShowOnLockScreenText,
+                    ok = dashboard.miuiShowOnLockScreenGranted,
+                    action = "处理",
+                    onAction = onOpenMiuiPermissionSettings
                 )
                 PermissionLine(
                     title = "准时提醒",

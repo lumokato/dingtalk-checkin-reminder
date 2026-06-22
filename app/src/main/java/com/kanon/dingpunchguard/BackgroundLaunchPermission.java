@@ -104,8 +104,34 @@ final class BackgroundLaunchPermission {
                     && alertChannelEnabled
                     && alertChannelHighPriority
                     && fullScreenIntentAllowed
-                    && modeAllowedOrUnknown(backgroundPopupMode)
-                    && modeAllowedOrUnknown(showOnLockScreenMode);
+                    && backgroundPopupAllowed()
+                    && showOnLockScreenAllowed();
+        }
+
+        boolean backgroundPopupAllowed() {
+            return modeAllowedOrUnknown(backgroundPopupMode);
+        }
+
+        boolean showOnLockScreenAllowed() {
+            return modeAllowedOrUnknown(showOnLockScreenMode);
+        }
+
+        String alertChannelText() {
+            if (!alertChannelEnabled) {
+                return "已关闭";
+            }
+            if (!alertChannelHighPriority) {
+                return "当前级别 " + alertChannelImportance + "，需要高优先级";
+            }
+            return "高优先级";
+        }
+
+        String backgroundPopupText() {
+            return appOpDisplayText(backgroundPopupMode);
+        }
+
+        String showOnLockScreenText() {
+            return appOpDisplayText(showOnLockScreenMode);
         }
 
         String logText() {
@@ -136,7 +162,7 @@ final class BackgroundLaunchPermission {
             if (!fullScreenIntentAllowed) {
                 return "全屏通知未放行";
             }
-            if (!modeAllowedOrUnknown(backgroundPopupMode) || !modeAllowedOrUnknown(showOnLockScreenMode)) {
+            if (!backgroundPopupAllowed() || !showOnLockScreenAllowed()) {
                 return "后台弹出未放行";
             }
             return "未完全放行";
@@ -148,6 +174,16 @@ final class BackgroundLaunchPermission {
 
         private static String modeText(Integer mode) {
             return mode == null ? "unknown" : String.valueOf(mode);
+        }
+
+        private static String appOpDisplayText(Integer mode) {
+            if (mode == null) {
+                return "系统未返回，按已放行处理";
+            }
+            if (mode == MODE_ALLOWED) {
+                return "已放行";
+            }
+            return "未放行，模式 " + mode;
         }
     }
 }

@@ -10,6 +10,7 @@
 - 安装版本：`dumpsys package com.kanon.dingpunchguard` 必须显示目标 `versionName`。
 - 使用情况访问：`GET_USAGE_STATS: allow`，否则不能启用前台兜底记录。
 - 后台拉起相关：通知总开关、`打卡强提醒` 通知渠道高优先级、Android 14+ 全屏通知、HyperOS 私有后台弹出/锁屏显示 appop 需放行。
+- 权限页必须把后台拉起拆成独立检查项，不能只显示一个“后台拉起”总状态；每个缺项都要能单独看出状态并进入对应设置页。
 - 覆盖安装后需重新核对后台拉起相关状态；HyperOS 可能把私有开关重置为 `ignore`，用户也可能把通知渠道降级成静默。
 - 日志：`/sdcard/Android/data/com.kanon.dingpunchguard/files/guard-events.log`。
 - 前台按钮、状态通知和强提醒通知里的“打开钉钉”必须走守护服务统一拉起通道，不能直接 `Activity.startActivity()` 或直接钉钉 `PendingIntent`，避免前台或手动入口成功掩盖后台路径失败。

@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
                     onRefreshLocation = { refreshCurrentLocation() },
                     onStartGuard = { startGuard() },
                     onStopGuard = { stopGuard() },
-                    onOpenDingTalk = { openDingTalkDirectly() },
+                    onOpenDingTalk = { requestDingTalkLaunch() },
                     onConfirmCheckIn = {
                         startGuardService(Config.ACTION_CONFIRM_CHECKIN)
                         refreshDashboard()
@@ -171,6 +171,16 @@ class MainActivity : ComponentActivity() {
         }
 
         handleAutomationIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.activityStarted()
+    }
+
+    override fun onStop() {
+        AppVisibility.activityStopped()
+        super.onStop()
     }
 
     override fun onResume() {
@@ -487,21 +497,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openDingTalkDirectly() {
-        val intent = packageManager.getLaunchIntentForPackage(Config.DINGTALK_PACKAGE)
-        if (intent == null) {
-            Toast.makeText(this, "没有找到钉钉", Toast.LENGTH_LONG).show()
-            return
-        }
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        try {
-            Config.markDingTalkOpened(this, System.currentTimeMillis())
-            startActivity(intent)
-            AppLog.i(this, "DingTalk launch intent sent from foreground activity")
-        } catch (e: Exception) {
-            AppLog.e(this, "DingTalk foreground activity launch failed", e)
-            Toast.makeText(this, "打开钉钉失败：${e.message}", Toast.LENGTH_LONG).show()
-        }
+    private fun requestDingTalkLaunch() {
+        AppLog.i(this, "DingTalk launch requested from activity through guard service")
+        startGuardService(Config.ACTION_OPEN_DING)
     }
 
     private fun openNotificationListenerSettings() {
@@ -626,7 +624,7 @@ class MainActivity : ComponentActivity() {
         val notificationGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         val usageStatsGranted = ForegroundAppVerifier.hasUsageStatsAccess(this)
-        val overlayGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        val backgroundLaunchStatus = BackgroundLaunchPermission.status(this)
         val dingTalkInstalled = packageManager.getLaunchIntentForPackage(Config.DINGTALK_PACKAGE) != null
         val checkoutDueMillis = TimeScheduler.checkoutDueMillis(this)
         val hasCheckIn = Config.hasCheckedInToday(this)
@@ -658,8 +656,8 @@ class MainActivity : ComponentActivity() {
         if (!isIgnoringBatteryOptimizations()) {
             warnings.add("电池后台未放行，系统清理后提醒成功率会下降。")
         }
-        if (!overlayGranted) {
-            warnings.add("后台弹出未放行，系统可能拦截自动打开钉钉。")
+        if (!backgroundLaunchStatus.likelyAllowed()) {
+            warnings.add("后台启动/弹出未完全放行，应用在后台时系统可能拦截自动打开钉钉。")
         }
         if (!dingTalkInstalled) {
             warnings.add("没有解析到钉钉启动入口，请确认钉钉已安装。")
@@ -736,7 +734,8 @@ class MainActivity : ComponentActivity() {
             notificationGranted = notificationGranted,
             notificationListenerEnabled = isDingTalkNotificationListenerEnabled(),
             usageStatsGranted = usageStatsGranted,
-            overlayGranted = overlayGranted,
+            backgroundLaunchGranted = backgroundLaunchStatus.likelyAllowed(),
+            backgroundLaunchText = backgroundLaunchStatus.displayText(),
             exactAlarmAllowed = exactAlarm,
             batteryAllowed = isIgnoringBatteryOptimizations(),
             dingTalkInstalled = dingTalkInstalled,
@@ -1029,7 +1028,8 @@ private data class DashboardState(
     val notificationGranted: Boolean = false,
     val notificationListenerEnabled: Boolean = false,
     val usageStatsGranted: Boolean = false,
-    val overlayGranted: Boolean = false,
+    val backgroundLaunchGranted: Boolean = false,
+    val backgroundLaunchText: String = "未检测",
     val exactAlarmAllowed: Boolean = false,
     val batteryAllowed: Boolean = false,
     val dingTalkInstalled: Boolean = false,
@@ -2405,9 +2405,9 @@ private fun PermissionsScreen(
                     onAction = onOpenUsageAccessSettings
                 )
                 PermissionLine(
-                    title = "后台弹出",
-                    subtitle = if (dashboard.overlayGranted) "已放行" else "系统可能拦截自动打开钉钉",
-                    ok = dashboard.overlayGranted,
+                    title = "后台拉起",
+                    subtitle = if (dashboard.backgroundLaunchGranted) dashboard.backgroundLaunchText else "后台时系统可能拦截自动打开钉钉",
+                    ok = dashboard.backgroundLaunchGranted,
                     action = "处理",
                     onAction = onOpenOverlaySettings
                 )

@@ -39,21 +39,24 @@ final class ForegroundAppVerifier {
     }
 
     static boolean wasPackageForegroundSince(Context context, String packageName, long sinceMillis) {
-        return packageName.equals(lastForegroundPackageSince(context, sinceMillis));
+        return foregroundPackageHistory(context, packageName, sinceMillis).targetSeen();
     }
 
     static String lastForegroundPackageSince(Context context, long sinceMillis) {
+        return foregroundPackageHistory(context, "", sinceMillis).latestPackage();
+    }
+
+    private static ForegroundPackageHistory foregroundPackageHistory(Context context, String targetPackage, long sinceMillis) {
+        ForegroundPackageHistory history = new ForegroundPackageHistory(targetPackage, sinceMillis);
         if (!hasUsageStatsAccess(context)) {
-            return "";
+            return history;
         }
         UsageStatsManager usageStatsManager = context.getSystemService(UsageStatsManager.class);
         if (usageStatsManager == null) {
-            return "";
+            return history;
         }
         long start = Math.max(0L, sinceMillis - 1_000L);
         long end = System.currentTimeMillis() + 1_000L;
-        String latestPackage = "";
-        long latestMillis = Long.MIN_VALUE;
         try {
             UsageEvents events = usageStatsManager.queryEvents(start, end);
             UsageEvents.Event event = new UsageEvents.Event();
@@ -63,16 +66,15 @@ final class ForegroundAppVerifier {
                 if (type != UsageEvents.Event.MOVE_TO_FOREGROUND && !isActivityResumed(type)) {
                     continue;
                 }
-                if (event.getTimeStamp() < sinceMillis - 1_000L || event.getTimeStamp() < latestMillis) {
+                if (event.getTimeStamp() < sinceMillis - 1_000L) {
                     continue;
                 }
-                latestMillis = event.getTimeStamp();
-                latestPackage = event.getPackageName() == null ? "" : event.getPackageName();
+                history.accept(event.getPackageName(), event.getTimeStamp());
             }
         } catch (Exception e) {
             AppLog.e(context, "foreground package verification failed", e);
         }
-        return latestPackage;
+        return history;
     }
 
     private static boolean isActivityResumed(int eventType) {

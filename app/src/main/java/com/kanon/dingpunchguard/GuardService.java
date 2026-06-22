@@ -29,26 +29,16 @@ import java.time.ZoneId;
 import java.util.Locale;
 
 public class GuardService extends Service {
-    private static final long TICK_VERY_NEAR_MILLIS = 5_000L;
-    private static final long TICK_APPROACHING_MILLIS = 15_000L;
-    private static final long TICK_DEFAULT_MILLIS = 15_000L;
-    private static final long TICK_FAR_MILLIS = 60_000L;
+    private static final long TICK_VERY_NEAR_MILLIS = CheckInPollingPolicy.TICK_VERY_NEAR_MILLIS;
+    private static final long TICK_APPROACHING_MILLIS = CheckInPollingPolicy.TICK_APPROACHING_MILLIS;
+    private static final long TICK_DEFAULT_MILLIS = CheckInPollingPolicy.TICK_DEFAULT_MILLIS;
+    private static final long TICK_FAR_MILLIS = CheckInPollingPolicy.TICK_FAR_MILLIS;
     private static final long UNLOCK_BURST_MILLIS = 20_000L;
     private static final long UNLOCK_PROBE_MILLIS = 15_000L;
     private static final long UNLOCK_PROBE_COOLDOWN_MILLIS = 60_000L;
-    private static final long LOCATION_STALE_MILLIS = 120_000L;
-    private static final long LOCATION_FAST_MILLIS = 5_000L;
-    private static final long LOCATION_NEAR_MILLIS = 15_000L;
-    private static final long LOCATION_WATCH_MILLIS = 60_000L;
-    private static final long LOCATION_FAR_MILLIS = 60_000L;
-    private static final float LOCATION_FAST_METERS = 0.0f;
-    private static final float LOCATION_NEAR_METERS = 5.0f;
-    private static final float LOCATION_WATCH_METERS = 30.0f;
-    private static final float LOCATION_FAR_METERS = 30.0f;
+    private static final long LOCATION_STALE_MILLIS = CheckInPollingPolicy.LOCATION_STALE_MILLIS;
     // Keep these thresholds in sync with docs/checkin-flow.md.
-    private static final float EDGE_EXTRA_METERS = 50.0f;
-    private static final float APPROACH_EXTRA_METERS = 500.0f;
-    private static final float APPROACH_DELTA_METERS = 5.0f;
+    private static final float EDGE_EXTRA_METERS = CheckInPollingPolicy.EDGE_EXTRA_METERS;
     private static final int PHASE_IDLE = 0;
     private static final int PHASE_CHECKIN = 1;
     private static final int PHASE_CHECKOUT = 2;
@@ -607,52 +597,39 @@ public class GuardService extends Service {
             return phase == PHASE_CHECKIN ? TICK_VERY_NEAR_MILLIS : TICK_APPROACHING_MILLIS;
         }
 
-        int radius = Math.max(1, Config.radiusMeters(this));
-        float extraMeters = Math.max(0.0f, state.distanceMeters - radius);
         boolean approaching = isCheckInApproachActive(state);
-        long delay;
-        if (state.inside || extraMeters <= EDGE_EXTRA_METERS) {
-            delay = TICK_VERY_NEAR_MILLIS;
-        } else if (phase == PHASE_CHECKIN && extraMeters <= APPROACH_EXTRA_METERS) {
-            delay = TICK_VERY_NEAR_MILLIS;
-        } else if (approaching) {
-            delay = TICK_APPROACHING_MILLIS;
-        } else {
-            delay = TICK_FAR_MILLIS;
-        }
+        long delay = CheckInPollingPolicy.nextTickDelayMillis(
+                phase == PHASE_CHECKIN,
+                phase == PHASE_CHECKOUT,
+                Config.requireLocationForCheckout(this),
+                checkInInsideLatched,
+                inUnlockBurst(),
+                state.hasLocation,
+                state.inside,
+                state.distanceMeters,
+                Config.radiusMeters(this),
+                approaching
+        );
         rememberDistance(state.distanceMeters);
         return delay;
     }
 
-    private boolean isApproachingTarget(float distanceMeters) {
-        if (previousDistanceMeters == null || previousDistanceAtMillis <= 0L) {
-            return false;
-        }
-        float delta = previousDistanceMeters - distanceMeters;
-        return delta > APPROACH_DELTA_METERS;
-    }
-
     private boolean isCheckInApproachActive(DistanceState state) {
-        if (lastPhase != PHASE_CHECKIN) {
-            return false;
-        }
-        if (checkInApproachLatched) {
-            return true;
-        }
-        if (!state.hasLocation || state.inside) {
-            return false;
-        }
-        int radius = Math.max(1, Config.radiusMeters(this));
-        float extraMeters = Math.max(0.0f, state.distanceMeters - radius);
-        if (extraMeters <= EDGE_EXTRA_METERS || extraMeters > APPROACH_EXTRA_METERS) {
-            return false;
-        }
-        if (isApproachingTarget(state.distanceMeters)) {
+        boolean active = CheckInPollingPolicy.approachActive(
+                lastPhase == PHASE_CHECKIN,
+                checkInApproachLatched,
+                state.hasLocation,
+                state.inside,
+                state.distanceMeters,
+                Config.radiusMeters(this),
+                previousDistanceAtMillis <= 0L ? null : previousDistanceMeters
+        );
+        if (active && !checkInApproachLatched) {
             checkInApproachLatched = true;
+            float extraMeters = Math.max(0.0f, state.distanceMeters - Math.max(1, Config.radiusMeters(this)));
             AppLog.i(this, String.format(Locale.CHINA, "check-in approach latched distance=%.0f extra=%.0f", state.distanceMeters, extraMeters));
-            return true;
         }
-        return false;
+        return active;
     }
 
     private void rememberDistance(float distanceMeters) {
@@ -673,23 +650,33 @@ public class GuardService extends Service {
     }
 
     private boolean openDingTalk() {
-        PackageManager packageManager = getPackageManager();
-        Intent intent = packageManager.getLaunchIntentForPackage(Config.DINGTALK_PACKAGE);
-        if (intent == null) {
-            NotificationHelper.postAlert(this, "没有找到钉钉", "未安装钉钉，或系统不允许查询钉钉包名。", null);
-            return false;
+        boolean appForeground = AppVisibility.isForeground();
+        BackgroundLaunchPermission.Status backgroundLaunchStatus = BackgroundLaunchPermission.status(this);
+        boolean posted = NotificationHelper.postDingTalkLaunchRequest(
+                this,
+                currentPhase(this) == PHASE_CHECKIN ? "上班打卡" : "下班打卡",
+                "正在通过后台拉起通道打开钉钉。",
+                confirmActionForPhase(currentPhase(this))
+        );
+        if (posted) {
+            long now = System.currentTimeMillis();
+            Config.markDingTalkOpened(this, now);
+            AppLog.i(this, "DingTalk launch requested through notification pending intent appForeground="
+                    + appForeground
+                    + " "
+                    + backgroundLaunchStatus.logText());
         }
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        try {
-            startActivity(intent);
-            Config.markDingTalkOpened(this, System.currentTimeMillis());
-            AppLog.i(this, "DingTalk launch intent sent");
-            return true;
-        } catch (Exception e) {
-            AppLog.e(this, "DingTalk launch failed", e);
-            NotificationHelper.postAlert(this, "需要手动打开钉钉", "系统限制了后台自动打开页面。请点此通知或通知按钮打开钉钉。", null);
-            return false;
+        return posted;
+    }
+
+    private String confirmActionForPhase(int phase) {
+        if (phase == PHASE_CHECKIN) {
+            return Config.ACTION_CONFIRM_CHECKIN;
         }
+        if (phase == PHASE_CHECKOUT) {
+            return Config.ACTION_CONFIRM_CHECKOUT;
+        }
+        return null;
     }
 
     private void verifyDingTalkForegroundAfterLaunch(int phase, long openMillis, boolean retryAttempt) {
@@ -705,11 +692,12 @@ public class GuardService extends Service {
                 AppLog.i(this, "DingTalk foreground verification skipped because open attempt is stale");
                 return;
             }
+            boolean dingTalkWasForeground = ForegroundAppVerifier.wasPackageForegroundSince(this, Config.DINGTALK_PACKAGE, openMillis);
             String latestForegroundPackage = ForegroundAppVerifier.lastForegroundPackageSince(this, openMillis);
-            if (Config.DINGTALK_PACKAGE.equals(latestForegroundPackage)) {
+            if (dingTalkWasForeground) {
                 autoOpenRetryUntilMillis = 0L;
                 Config.markDingTalkVerifiedForeground(this, System.currentTimeMillis());
-                AppLog.i(this, "DingTalk foreground verified after launch latestForeground=" + latestForegroundPackage);
+                AppLog.i(this, "DingTalk foreground verified after launch dingTalkSeen=true latestForeground=" + latestForegroundPackage);
                 return;
             }
 
@@ -769,9 +757,10 @@ public class GuardService extends Service {
                 AppLog.i(this, "assumed open success canceled because open attempt is stale");
                 return;
             }
-            String latestForegroundPackage = ForegroundAppVerifier.lastForegroundPackageSince(this, openMillis);
-            if (!Config.DINGTALK_PACKAGE.equals(latestForegroundPackage)) {
-                AppLog.i(this, "assumed open success canceled because DingTalk was not verified in foreground latestForeground=" + latestForegroundPackage);
+            boolean dingTalkWasForeground = ForegroundAppVerifier.wasPackageForegroundSince(this, Config.DINGTALK_PACKAGE, openMillis);
+            if (!dingTalkWasForeground) {
+                String latestForegroundPackage = ForegroundAppVerifier.lastForegroundPackageSince(this, openMillis);
+                AppLog.i(this, "assumed open success canceled because DingTalk was not seen in foreground latestForeground=" + latestForegroundPackage);
                 NotificationHelper.postAlert(
                         this,
                         phase == PHASE_CHECKIN ? "上班打卡未确认" : "下班打卡未确认",
@@ -835,53 +824,33 @@ public class GuardService extends Service {
     }
 
     private long wantedLocationMillis(boolean forceFast) {
-        if (checkInInsideLatched) {
-            return LOCATION_WATCH_MILLIS;
-        }
-        if (forceFast || inUnlockBurst()) {
-            return LOCATION_FAST_MILLIS;
-        }
         DistanceState state = distanceState();
-        if (!state.hasLocation) {
-            return LOCATION_NEAR_MILLIS;
-        }
-        float extraMeters = Math.max(0.0f, state.distanceMeters - Math.max(1, Config.radiusMeters(this)));
         boolean approaching = isCheckInApproachActive(state);
-        if (state.inside || extraMeters <= EDGE_EXTRA_METERS) {
-            return LOCATION_FAST_MILLIS;
-        }
-        if (approaching) {
-            return LOCATION_NEAR_MILLIS;
-        }
-        if (extraMeters <= APPROACH_EXTRA_METERS) {
-            return LOCATION_WATCH_MILLIS;
-        }
-        return LOCATION_FAR_MILLIS;
+        return CheckInPollingPolicy.locationRequest(
+                checkInInsideLatched,
+                forceFast,
+                inUnlockBurst(),
+                state.hasLocation,
+                state.inside,
+                state.distanceMeters,
+                Config.radiusMeters(this),
+                approaching
+        ).intervalMillis;
     }
 
     private float wantedLocationMeters(boolean forceFast) {
-        if (checkInInsideLatched) {
-            return LOCATION_WATCH_METERS;
-        }
-        if (forceFast || inUnlockBurst()) {
-            return LOCATION_FAST_METERS;
-        }
         DistanceState state = distanceState();
-        if (!state.hasLocation) {
-            return LOCATION_NEAR_METERS;
-        }
-        float extraMeters = Math.max(0.0f, state.distanceMeters - Math.max(1, Config.radiusMeters(this)));
         boolean approaching = isCheckInApproachActive(state);
-        if (state.inside || extraMeters <= EDGE_EXTRA_METERS) {
-            return LOCATION_FAST_METERS;
-        }
-        if (approaching) {
-            return LOCATION_NEAR_METERS;
-        }
-        if (extraMeters <= APPROACH_EXTRA_METERS) {
-            return LOCATION_WATCH_METERS;
-        }
-        return LOCATION_FAR_METERS;
+        return CheckInPollingPolicy.locationRequest(
+                checkInInsideLatched,
+                forceFast,
+                inUnlockBurst(),
+                state.hasLocation,
+                state.inside,
+                state.distanceMeters,
+                Config.radiusMeters(this),
+                approaching
+        ).minDistanceMeters;
     }
 
     private void stopLocationUpdates() {

@@ -22,10 +22,26 @@ public class GuardDecisionEngineTest {
     }
 
     @Test
+    public void checkInStaleLocationWinsEvenWhenOutsideTarget() {
+        assertEquals(
+                GuardDecisionEngine.CheckInAction.WAIT_FRESH_LOCATION,
+                GuardDecisionEngine.decideCheckIn(true, true, false, true)
+        );
+    }
+
+    @Test
     public void checkInOutsideTargetDoesNotOpenDingTalk() {
         assertEquals(
                 GuardDecisionEngine.CheckInAction.OUTSIDE_TARGET,
                 GuardDecisionEngine.decideCheckIn(true, false, false, true)
+        );
+    }
+
+    @Test
+    public void checkInOutsideTargetDoesNotCareWhetherAutoOpenIsReady() {
+        assertEquals(
+                GuardDecisionEngine.CheckInAction.OUTSIDE_TARGET,
+                GuardDecisionEngine.decideCheckIn(true, false, false, false)
         );
     }
 
@@ -70,10 +86,42 @@ public class GuardDecisionEngineTest {
     }
 
     @Test
+    public void checkOutWithLocationRequirementWaitsForLocationBeforeUnlockState() {
+        assertEquals(
+                GuardDecisionEngine.CheckOutAction.WAIT_LOCATION,
+                GuardDecisionEngine.decideCheckOut(true, false, false, true, true)
+        );
+    }
+
+    @Test
+    public void checkOutWithLocationRequirementRejectsStaleLocationBeforeOutsideTarget() {
+        assertEquals(
+                GuardDecisionEngine.CheckOutAction.WAIT_FRESH_LOCATION,
+                GuardDecisionEngine.decideCheckOut(true, true, true, false, true)
+        );
+    }
+
+    @Test
     public void checkOutWithLocationRequirementRejectsOutsideTarget() {
         assertEquals(
                 GuardDecisionEngine.CheckOutAction.OUTSIDE_TARGET,
                 GuardDecisionEngine.decideCheckOut(true, true, false, false, true)
+        );
+    }
+
+    @Test
+    public void checkOutWithLocationRequirementInsideWaitsUntilAutoOpenReady() {
+        assertEquals(
+                GuardDecisionEngine.CheckOutAction.WAIT_UNLOCK,
+                GuardDecisionEngine.decideCheckOut(true, true, false, true, false)
+        );
+    }
+
+    @Test
+    public void checkOutWithLocationRequirementInsideOpensWhenAutoOpenReady() {
+        assertEquals(
+                GuardDecisionEngine.CheckOutAction.OPEN_DINGTALK,
+                GuardDecisionEngine.decideCheckOut(true, true, false, true, true)
         );
     }
 }

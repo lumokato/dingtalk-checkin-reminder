@@ -54,7 +54,7 @@ final class NotificationHelper {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        PendingIntent openPendingIntent = dingTalkActivityPendingIntent(context, 11);
+        PendingIntent openPendingIntent = openDingTalkServicePendingIntent(context, 11);
         PendingIntent stopPendingIntent = servicePendingIntent(context, 12, Config.ACTION_STOP);
 
         Notification.Builder builder = new Notification.Builder(context)
@@ -96,7 +96,7 @@ final class NotificationHelper {
                 .setShowWhen(true)
                 .setOnlyAlertOnce(false)
                 .setCategory(Notification.CATEGORY_REMINDER)
-                .addAction(R.drawable.ic_stat_punch, "打开钉钉", dingTalkActivityPendingIntent(context, 21));
+                .addAction(R.drawable.ic_stat_punch, "打开钉钉", openDingTalkServicePendingIntent(context, 21));
 
         if (confirmAction != null) {
             String label = Config.ACTION_CONFIRM_CHECKIN.equals(confirmAction) ? "已上班打卡" : "已下班打卡";
@@ -112,6 +112,46 @@ final class NotificationHelper {
 
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         manager.notify(Config.ALERT_NOTIFICATION_ID, builder.build());
+    }
+
+    static boolean postDingTalkLaunchRequest(Context context, String title, String text, String confirmAction) {
+        ensureChannels(context);
+        PendingIntent dingTalkPendingIntent = dingTalkFullScreenPendingIntentOrNull(context, 41);
+        if (dingTalkPendingIntent == null) {
+            postAlert(context, "没有找到钉钉", "未安装钉钉，或系统不允许查询钉钉包名。", confirmAction);
+            return false;
+        }
+        PendingIntent openThroughServicePendingIntent = openDingTalkServicePendingIntent(context, 43);
+
+        Notification.Builder builder = new Notification.Builder(context)
+                .setSmallIcon(R.drawable.ic_stat_punch)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setContentIntent(openThroughServicePendingIntent)
+                .setFullScreenIntent(dingTalkPendingIntent, true)
+                .setAutoCancel(false)
+                .setOngoing(true)
+                .setShowWhen(true)
+                .setOnlyAlertOnce(false)
+                .setCategory(Notification.CATEGORY_ALARM)
+                .addAction(R.drawable.ic_stat_punch, "打开钉钉", openThroughServicePendingIntent);
+
+        if (confirmAction != null) {
+            String label = Config.ACTION_CONFIRM_CHECKIN.equals(confirmAction) ? "已上班打卡" : "已下班打卡";
+            builder.addAction(R.drawable.ic_stat_punch, label, servicePendingIntent(context, 42, confirmAction));
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setChannelId(ALERT_CHANNEL_ID);
+        } else {
+            builder.setPriority(Notification.PRIORITY_MAX);
+            builder.setVibrate(new long[]{0, 500, 250, 500});
+        }
+
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        manager.notify(Config.ALERT_NOTIFICATION_ID, builder.build());
+        return true;
     }
 
     static void cancelAlert(Context context) {
@@ -176,10 +216,14 @@ final class NotificationHelper {
         );
     }
 
-    private static PendingIntent dingTalkActivityPendingIntent(Context context, int requestCode) {
+    private static PendingIntent openDingTalkServicePendingIntent(Context context, int requestCode) {
+        return servicePendingIntent(context, requestCode, Config.ACTION_OPEN_DING);
+    }
+
+    private static PendingIntent dingTalkFullScreenPendingIntentOrNull(Context context, int requestCode) {
         Intent intent = context.getPackageManager().getLaunchIntentForPackage(Config.DINGTALK_PACKAGE);
         if (intent == null) {
-            return servicePendingIntent(context, requestCode, Config.ACTION_OPEN_DING);
+            return null;
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         return PendingIntent.getActivity(

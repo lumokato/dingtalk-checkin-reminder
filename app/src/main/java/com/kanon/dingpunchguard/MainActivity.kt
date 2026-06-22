@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
                     onOpenNotificationListener = { openNotificationListenerSettings() },
                     onOpenUsageAccessSettings = { openUsageAccessSettings() },
                     onOpenOverlaySettings = { openOverlaySettings() },
+                    onOpenBackgroundLaunchSettings = { openBackgroundLaunchSettings() },
                     onRequestExactAlarm = { requestExactAlarmIfNeeded() },
                     onOpenBatterySettings = { openBatterySettings() },
                     onOpenAppSettings = { openAppSettings() },
@@ -524,6 +525,26 @@ class MainActivity : ComponentActivity() {
                 startActivity(
                     Intent(
                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                return
+            } catch (_: Exception) {
+            }
+        }
+        if (openMiuiPermissionEditor()) {
+            return
+        }
+        openAppSettings()
+    }
+
+    private fun openBackgroundLaunchSettings() {
+        val status = BackgroundLaunchPermission.status(this)
+        if (!status.fullScreenIntentAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
                         Uri.parse("package:$packageName")
                     )
                 )
@@ -1099,6 +1120,7 @@ private fun DingPunchApp(
     onOpenNotificationListener: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenBackgroundLaunchSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
@@ -1173,6 +1195,7 @@ private fun DingPunchApp(
                     onOpenNotificationListener = onOpenNotificationListener,
                     onOpenUsageAccessSettings = onOpenUsageAccessSettings,
                     onOpenOverlaySettings = onOpenOverlaySettings,
+                    onOpenBackgroundLaunchSettings = onOpenBackgroundLaunchSettings,
                     onRequestExactAlarm = onRequestExactAlarm,
                     onOpenBatterySettings = onOpenBatterySettings,
                     onOpenAppSettings = onOpenAppSettings,
@@ -2355,6 +2378,7 @@ private fun PermissionsScreen(
     onOpenNotificationListener: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenBackgroundLaunchSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
@@ -2409,7 +2433,7 @@ private fun PermissionsScreen(
                     subtitle = if (dashboard.backgroundLaunchGranted) dashboard.backgroundLaunchText else "后台时系统可能拦截自动打开钉钉",
                     ok = dashboard.backgroundLaunchGranted,
                     action = "处理",
-                    onAction = onOpenOverlaySettings
+                    onAction = onOpenBackgroundLaunchSettings
                 )
                 PermissionLine(
                     title = "准时提醒",

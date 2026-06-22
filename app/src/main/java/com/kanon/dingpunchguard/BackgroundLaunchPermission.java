@@ -1,6 +1,7 @@
 package com.kanon.dingpunchguard;
 
 import android.app.AppOpsManager;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.os.Build;
 import android.os.Process;
@@ -19,9 +20,18 @@ final class BackgroundLaunchPermission {
     static Status status(Context context) {
         boolean overlayAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
                 || Settings.canDrawOverlays(context);
+        boolean fullScreenIntentAllowed = canUseFullScreenIntent(context);
         Integer backgroundPopupMode = checkPrivateAppOp(context, MIUI_BACKGROUND_POPUP_OP);
         Integer showOnLockScreenMode = checkPrivateAppOp(context, MIUI_SHOW_ON_LOCK_SCREEN_OP);
-        return new Status(overlayAllowed, backgroundPopupMode, showOnLockScreenMode);
+        return new Status(overlayAllowed, fullScreenIntentAllowed, backgroundPopupMode, showOnLockScreenMode);
+    }
+
+    private static boolean canUseFullScreenIntent(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return true;
+        }
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        return notificationManager != null && notificationManager.canUseFullScreenIntent();
     }
 
     private static Integer checkPrivateAppOp(Context context, int op) {
@@ -40,23 +50,26 @@ final class BackgroundLaunchPermission {
 
     static final class Status {
         final boolean overlayAllowed;
+        final boolean fullScreenIntentAllowed;
         final Integer backgroundPopupMode;
         final Integer showOnLockScreenMode;
 
-        Status(boolean overlayAllowed, Integer backgroundPopupMode, Integer showOnLockScreenMode) {
+        Status(boolean overlayAllowed, boolean fullScreenIntentAllowed, Integer backgroundPopupMode, Integer showOnLockScreenMode) {
             this.overlayAllowed = overlayAllowed;
+            this.fullScreenIntentAllowed = fullScreenIntentAllowed;
             this.backgroundPopupMode = backgroundPopupMode;
             this.showOnLockScreenMode = showOnLockScreenMode;
         }
 
         boolean likelyAllowed() {
-            return overlayAllowed
+            return fullScreenIntentAllowed
                     && modeAllowedOrUnknown(backgroundPopupMode)
                     && modeAllowedOrUnknown(showOnLockScreenMode);
         }
 
         String logText() {
             return "overlayAllowed=" + overlayAllowed
+                    + " fullScreenIntentAllowed=" + fullScreenIntentAllowed
                     + " miuiBackgroundPopup=" + modeText(backgroundPopupMode)
                     + " miuiShowOnLockScreen=" + modeText(showOnLockScreenMode)
                     + " likelyAllowed=" + likelyAllowed();
@@ -65,6 +78,12 @@ final class BackgroundLaunchPermission {
         String displayText() {
             if (likelyAllowed()) {
                 return "已放行";
+            }
+            if (!fullScreenIntentAllowed) {
+                return "全屏通知未放行";
+            }
+            if (!modeAllowedOrUnknown(backgroundPopupMode) || !modeAllowedOrUnknown(showOnLockScreenMode)) {
+                return "后台弹出未放行";
             }
             return "未完全放行";
         }

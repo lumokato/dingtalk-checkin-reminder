@@ -65,7 +65,7 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
                 eventText,
                 event.getEventType() == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
         );
-        boolean rootSuccess = PunchRecorder.looksLikeDingTalkPunchSuccess(rootText, false);
+        boolean rootSuccess = PunchRecorder.looksLikeDingTalkPunchSuccessRoot(rootText);
         boolean successMatch = eventSuccess || rootSuccess;
         String matchedText = eventSuccess ? eventText : rootText;
         int kind = PunchRecorder.inferKindFromTextOrSchedule(this, matchedText);
@@ -95,6 +95,7 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
                         + " kind=" + kind
                         + " recorded=" + recorded
                         + " textHash=" + Integer.toHexString(textHash)
+                        + " textLength=" + matchedText.length()
                         + " eventTextMatch=" + eventSuccess
                         + " rootTextMatch=" + rootSuccess
                         + " " + PunchRecorder.dingTalkSuccessDebug(this, matchedText)

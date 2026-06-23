@@ -47,23 +47,26 @@ final class PunchRecorder {
 
     static int inferKindFromTextOrSchedule(Context context, String text) {
         String normalized = normalize(text);
+        int explicitSuccessKind = inferExplicitSuccessKind(normalized);
+        if (explicitSuccessKind != KIND_UNKNOWN) {
+            return explicitSuccessKind;
+        }
+
+        boolean checkoutWindow = isCheckoutRecognitionWindowNow(context);
         if (containsAny(normalized, "下班", "签退", "退勤")) {
+            return checkoutWindow ? KIND_CHECKOUT : KIND_UNKNOWN;
+        }
+
+        boolean checkInWindow = isCheckInWindowNow(context);
+        if (containsAny(normalized, "上班", "签到", "出勤")) {
+            return checkInWindow ? KIND_CHECKIN : KIND_UNKNOWN;
+        }
+
+        if (checkoutWindow) {
             return KIND_CHECKOUT;
         }
-        if (containsAny(normalized, "上班", "签到", "出勤")) {
-            return KIND_CHECKIN;
-        }
 
-        long now = System.currentTimeMillis();
-        if (!Config.hasCheckedOutToday(context)) {
-            long due = TimeScheduler.checkoutDueMillis(context);
-            long stop = due + Config.checkoutGraceMinutes(context) * 60_000L;
-            if (due > 0L && now >= due - 30 * 60_000L && now <= stop) {
-                return KIND_CHECKOUT;
-            }
-        }
-
-        if (!Config.hasCheckedInToday(context) && isCheckInWindowNow(context)) {
+        if (!Config.hasCheckedInToday(context) && checkInWindow) {
             return KIND_CHECKIN;
         }
         if (Config.hasMissedCheckInToday(context)) {
@@ -78,6 +81,37 @@ final class PunchRecorder {
         return KIND_UNKNOWN;
     }
 
+    static int inferExplicitSuccessKind(String text) {
+        String normalized = normalize(text);
+        int checkInAt = firstIndexOfAny(
+                normalized,
+                "上班极速打卡成功",
+                "上班打卡成功",
+                "上班已打卡",
+                "上班已完成打卡",
+                "已完成上班打卡",
+                "签到成功",
+                "出勤成功"
+        );
+        int checkOutAt = firstIndexOfAny(
+                normalized,
+                "下班极速打卡成功",
+                "下班打卡成功",
+                "下班已打卡",
+                "下班已完成打卡",
+                "已完成下班打卡",
+                "签退成功",
+                "退勤成功"
+        );
+        if (checkInAt >= 0 && (checkOutAt < 0 || checkInAt <= checkOutAt)) {
+            return KIND_CHECKIN;
+        }
+        if (checkOutAt >= 0) {
+            return KIND_CHECKOUT;
+        }
+        return KIND_UNKNOWN;
+    }
+
     static boolean looksLikeDingTalkPunchSuccess(Context context, String text) {
         return looksLikeDingTalkPunchSuccess(text, recentVerifiedDingForeground(context));
     }
@@ -87,6 +121,13 @@ final class PunchRecorder {
         return successKeyword(normalized)
                 && !failureKeyword(normalized)
                 && (strongPunchContext(normalized) || recentVerifiedForeground);
+    }
+
+    static boolean looksLikeDingTalkPunchSuccessRoot(String text) {
+        String normalized = normalize(text);
+        return looksLikeDingTalkPunchSuccess(text, false)
+                && !looksLikeBroadDingTalkPage(normalized)
+                && (looksLikeCompactPunchPrompt(normalized) || normalized.length() <= 1_200);
     }
 
     static String dingTalkSuccessDebug(Context context, String text) {
@@ -131,6 +172,39 @@ final class PunchRecorder {
         );
     }
 
+    private static boolean looksLikeCompactPunchPrompt(String normalized) {
+        return normalized.length() <= 700
+                && containsAny(normalized, "我知道了", "查看统计", "打卡成功", "签到成功", "签退成功")
+                && strongPunchContext(normalized);
+    }
+
+    private static boolean looksLikeBroadDingTalkPage(String normalized) {
+        int shellMarkers = countContains(
+                normalized,
+                "我的信息",
+                "搜索",
+                "密聊",
+                "日历",
+                "待办",
+                "DING",
+                "消息",
+                "未读",
+                "置顶"
+        );
+        int historyMarkers = countContains(
+                normalized,
+                "工作通知",
+                "筛选",
+                "通知设置",
+                "个人考勤日报",
+                "出勤统计",
+                "数据截至",
+                "打卡提醒",
+                "立即打卡"
+        );
+        return shellMarkers >= 4 || historyMarkers >= 2;
+    }
+
     private static boolean recentVerifiedDingForeground(Context context) {
         return System.currentTimeMillis() - Config.lastDingTalkVerifiedForegroundMillis(context) <= 10 * 60_000L;
     }
@@ -150,6 +224,22 @@ final class PunchRecorder {
         return !now.isBefore(start) && !now.isAfter(end);
     }
 
+    private static boolean isCheckoutRecognitionWindowNow(Context context) {
+        if (!ChinaWorkdayCalendar.isWorkday(LocalDate.now())) {
+            return false;
+        }
+        if (Config.hasCheckedOutToday(context)) {
+            return false;
+        }
+        long due = TimeScheduler.checkoutDueMillis(context);
+        if (due <= 0L) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        long stop = due + Config.checkoutGraceMinutes(context) * 60_000L;
+        return now >= due - 30 * 60_000L && now <= stop;
+    }
+
     private static boolean containsAny(String value, String... needles) {
         for (String needle : needles) {
             if (value.contains(needle)) {
@@ -157,6 +247,27 @@ final class PunchRecorder {
             }
         }
         return false;
+    }
+
+    private static int firstIndexOfAny(String value, String... needles) {
+        int first = -1;
+        for (String needle : needles) {
+            int index = value.indexOf(needle);
+            if (index >= 0 && (first < 0 || index < first)) {
+                first = index;
+            }
+        }
+        return first;
+    }
+
+    private static int countContains(String value, String... needles) {
+        int count = 0;
+        for (String needle : needles) {
+            if (value.contains(needle)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static String normalize(String value) {

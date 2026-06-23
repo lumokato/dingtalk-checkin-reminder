@@ -88,7 +88,6 @@ final class BackgroundLaunchPermission {
 
         boolean likelyAllowed() {
             return overlayAllowed
-                    && autoStartAllowed()
                     && backgroundPopupAllowed();
         }
 
@@ -115,11 +114,11 @@ final class BackgroundLaunchPermission {
         }
 
         String autoStartText() {
-            return appOpDisplayText(autoStartMode);
+            return appOpDisplayText(autoStartMode, "未放行，仅影响重启或被清理后的自恢复");
         }
 
         String backgroundPopupText() {
-            return appOpDisplayText(backgroundPopupMode);
+            return appOpDisplayText(backgroundPopupMode, "未放行，后台拉起可能被系统拦截");
         }
 
         String logText() {
@@ -140,13 +139,10 @@ final class BackgroundLaunchPermission {
             if (!overlayAllowed) {
                 return "悬浮窗/后台显示未放行";
             }
-            if (!autoStartAllowed()) {
-                return "MIUI自启动未放行";
-            }
             if (!backgroundPopupAllowed()) {
                 return "MIUI后台弹出未放行";
             }
-            return "未完全放行";
+            return "后台显示和后台弹出已放行";
         }
 
         private static boolean modeAllowedOrUnknown(Integer mode) {
@@ -157,14 +153,14 @@ final class BackgroundLaunchPermission {
             return mode == null ? "unknown" : String.valueOf(mode);
         }
 
-        private static String appOpDisplayText(Integer mode) {
+        private static String appOpDisplayText(Integer mode, String deniedText) {
             if (mode == null) {
                 return "系统未返回，按已放行处理";
             }
             if (mode == MODE_ALLOWED) {
                 return "已放行";
             }
-            return "未放行，模式 " + mode;
+            return deniedText + "，模式 " + mode;
         }
     }
 }

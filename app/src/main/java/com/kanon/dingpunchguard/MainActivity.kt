@@ -155,6 +155,7 @@ class MainActivity : ComponentActivity() {
                     onOpenAppNotificationSettings = { openAppNotificationSettings() },
                     onOpenAlertChannelSettings = { openAlertChannelSettings() },
                     onOpenOverlaySettings = { openOverlaySettings() },
+                    onOpenMiuiAutoStartSettings = { openMiuiAutoStartSettings() },
                     onOpenMiuiPermissionSettings = { openMiuiPermissionSettings() },
                     onRequestExactAlarm = { requestExactAlarmIfNeeded(showAlreadyAllowedToast = true) },
                     onOpenBatterySettings = { openBatterySettings() },
@@ -228,6 +229,18 @@ class MainActivity : ComponentActivity() {
             }
             AppLog.i(this, "today punch state cleared from automation intent")
             Toast.makeText(this, "已清理今天打卡状态", Toast.LENGTH_SHORT).show()
+            refreshDashboard()
+            return
+        }
+        if (intent?.action == Config.ACTION_CLEAR_TODAY_CHECKOUT_STATE) {
+            Config.clearTodayCheckOutState(this)
+            NotificationHelper.cancelAlert(this)
+            TimeScheduler.scheduleAll(this)
+            if (Config.isEnabled(this)) {
+                startGuardService(Config.ACTION_REFRESH)
+            }
+            AppLog.i(this, "today check-out state cleared from automation intent")
+            Toast.makeText(this, "已清理今天下班状态", Toast.LENGTH_SHORT).show()
             refreshDashboard()
             return
         }
@@ -587,6 +600,28 @@ class MainActivity : ComponentActivity() {
         if (openMiuiPermissionEditor()) {
             return
         }
+        openAppSettings()
+    }
+
+    private fun openMiuiAutoStartSettings() {
+        val explicit = Intent("miui.intent.action.OP_AUTO_START")
+        explicit.setClassName(
+            "com.miui.securitycenter",
+            "com.miui.permcenter.autostart.AutoStartManagementActivity"
+        )
+        explicit.putExtra("extra_pkgname", packageName)
+        explicit.putExtra("package_name", packageName)
+        if (tryStartActivity(explicit)) {
+            return
+        }
+
+        val implicit = Intent("miui.intent.action.OP_AUTO_START")
+        implicit.putExtra("extra_pkgname", packageName)
+        implicit.putExtra("package_name", packageName)
+        if (tryStartActivity(implicit)) {
+            return
+        }
+
         openAppSettings()
     }
 
@@ -991,13 +1026,7 @@ class MainActivity : ComponentActivity() {
 
     private fun isDingTalkNotificationListenerEnabled(): Boolean {
         val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        if (enabled.isNullOrBlank()) {
-            return false
-        }
-        val expected = ComponentName(this, DingTalkPunchObserver::class.java)
-            .flattenToString()
-            .lowercase(Locale.US)
-        return enabled.lowercase(Locale.US).contains(expected)
+        return enabledComponentsContain(enabled, ComponentName(this, DingTalkPunchObserver::class.java))
     }
 
     private fun isDingTalkAccessibilityObserverEnabled(): Boolean {
@@ -1006,13 +1035,26 @@ class MainActivity : ComponentActivity() {
             return false
         }
         val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        return enabledComponentsContain(enabled, ComponentName(this, DingTalkAccessibilityObserver::class.java))
+    }
+
+    private fun enabledComponentsContain(enabled: String?, expected: ComponentName): Boolean {
         if (enabled.isNullOrBlank()) {
             return false
         }
-        val expected = ComponentName(this, DingTalkAccessibilityObserver::class.java)
-            .flattenToString()
-            .lowercase(Locale.US)
-        return enabled.lowercase(Locale.US).contains(expected)
+        val expectedLong = expected.flattenToString().lowercase(Locale.US)
+        val expectedShort = expected.flattenToShortString().lowercase(Locale.US)
+        return enabled.split(':').any { raw ->
+            val value = raw.trim()
+            val normalized = value.lowercase(Locale.US)
+            if (normalized == expectedLong || normalized == expectedShort) {
+                true
+            } else {
+                ComponentName.unflattenFromString(value)?.let { parsed ->
+                    parsed.packageName == expected.packageName && parsed.className == expected.className
+                } == true
+            }
+        }
     }
 
     private fun formatMillis(millis: Long): String {
@@ -1203,6 +1245,7 @@ private fun DingPunchApp(
     onOpenAppNotificationSettings: () -> Unit,
     onOpenAlertChannelSettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenMiuiAutoStartSettings: () -> Unit,
     onOpenMiuiPermissionSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -1281,6 +1324,7 @@ private fun DingPunchApp(
                     onOpenAppNotificationSettings = onOpenAppNotificationSettings,
                     onOpenAlertChannelSettings = onOpenAlertChannelSettings,
                     onOpenOverlaySettings = onOpenOverlaySettings,
+                    onOpenMiuiAutoStartSettings = onOpenMiuiAutoStartSettings,
                     onOpenMiuiPermissionSettings = onOpenMiuiPermissionSettings,
                     onRequestExactAlarm = onRequestExactAlarm,
                     onOpenBatterySettings = onOpenBatterySettings,
@@ -2469,6 +2513,7 @@ private fun PermissionsScreen(
     onOpenAppNotificationSettings: () -> Unit,
     onOpenAlertChannelSettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenMiuiAutoStartSettings: () -> Unit,
     onOpenMiuiPermissionSettings: () -> Unit,
     onRequestExactAlarm: () -> Unit,
     onOpenBatterySettings: () -> Unit,
@@ -2546,8 +2591,9 @@ private fun PermissionsScreen(
                     title = "MIUI自启动",
                     subtitle = dashboard.miuiAutoStartText,
                     ok = dashboard.miuiAutoStartGranted,
-                    action = "处理",
-                    onAction = onOpenMiuiPermissionSettings
+                    action = "查看",
+                    required = false,
+                    onAction = onOpenMiuiAutoStartSettings
                 )
                 PermissionLine(
                     title = "MIUI后台弹出",
@@ -2861,6 +2907,7 @@ private fun PermissionLine(
     subtitle: String,
     ok: Boolean,
     action: String,
+    required: Boolean = true,
     onAction: () -> Unit
 ) {
     Row(
@@ -2870,9 +2917,17 @@ private fun PermissionLine(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = if (ok) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+            imageVector = when {
+                ok -> Icons.Filled.CheckCircle
+                required -> Icons.Filled.Warning
+                else -> Icons.Filled.Info
+            },
             contentDescription = null,
-            tint = if (ok) AppColors.Success else AppColors.Warning,
+            tint = when {
+                ok -> AppColors.Success
+                required -> AppColors.Warning
+                else -> AppColors.TextSecondary
+            },
             modifier = Modifier.size(22.dp)
         )
         Spacer(Modifier.width(10.dp))

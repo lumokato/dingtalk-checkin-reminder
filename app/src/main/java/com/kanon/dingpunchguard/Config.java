@@ -18,6 +18,7 @@ final class Config {
     static final String ACTION_REFRESH = "com.kanon.dingpunchguard.REFRESH";
     static final String ACTION_USER_PRESENT = "com.kanon.dingpunchguard.USER_PRESENT";
     static final String ACTION_CLEAR_TODAY_STATE = "com.kanon.dingpunchguard.CLEAR_TODAY_STATE";
+    static final String ACTION_CLEAR_TODAY_CHECKOUT_STATE = "com.kanon.dingpunchguard.CLEAR_TODAY_CHECKOUT_STATE";
 
     static final String DINGTALK_PACKAGE = "com.alibaba.android.rimet";
     static final int FOREGROUND_NOTIFICATION_ID = 1001;
@@ -204,6 +205,13 @@ final class Config {
                 .remove("checkout_millis")
                 .remove("last_dingtalk_open_millis")
                 .remove("last_dingtalk_verified_foreground_millis")
+                .apply();
+    }
+
+    static void clearTodayCheckOutState(Context context) {
+        prefs(context).edit()
+                .remove("checkout_date")
+                .remove("checkout_millis")
                 .apply();
     }
 

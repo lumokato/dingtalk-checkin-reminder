@@ -35,6 +35,8 @@ public class GuardService extends Service {
     private static final long TICK_FAR_MILLIS = CheckInPollingPolicy.TICK_FAR_MILLIS;
     private static final long UNLOCK_BURST_MILLIS = 20_000L;
     private static final long UNLOCK_PROBE_MILLIS = 15_000L;
+    private static final long CHECKOUT_UNLOCK_BURST_MILLIS = 15_000L;
+    private static final long CHECKOUT_UNLOCK_TICK_MILLIS = 1_000L;
     private static final long UNLOCK_PROBE_COOLDOWN_MILLIS = 60_000L;
     private static final long LOCATION_STALE_MILLIS = CheckInPollingPolicy.LOCATION_STALE_MILLIS;
     // Keep these thresholds in sync with docs/checkin-flow.md.
@@ -60,6 +62,7 @@ public class GuardService extends Service {
     private long lastInteractiveSignalMillis;
     private long lastUserPresentMillis;
     private String lastInteractiveSignalAction = "";
+    private boolean checkoutUnlockBurstActive;
     private boolean autoOpenReadyAtLastEvaluate;
     private long autoOpenRetryUntilMillis;
     private Float previousDistanceMeters;
@@ -219,9 +222,11 @@ public class GuardService extends Service {
         }
         if (phase == PHASE_IDLE) {
             autoOpenRetryUntilMillis = 0L;
+            checkoutUnlockBurstActive = false;
         }
         if (phase != PHASE_CHECKOUT) {
             checkoutConfirmAlertPosted = false;
+            checkoutUnlockBurstActive = false;
         }
         if (phase == PHASE_IDLE) {
             AppLog.i(this, "outside active window; stopping service until next alarm device="
@@ -444,7 +449,11 @@ public class GuardService extends Service {
 
         long burstMillis = interactiveBurstDurationMillis(phase, action);
         if (burstMillis > 0L) {
-            startUnlockBurst(burstMillis, action);
+            if (phase == PHASE_CHECKOUT && !Config.requireLocationForCheckout(this)) {
+                startCheckoutUnlockBurst(action);
+            } else {
+                startUnlockBurst(burstMillis, action);
+            }
             evaluate(true);
             return;
         }
@@ -509,7 +518,7 @@ public class GuardService extends Service {
 
     private long interactiveBurstDurationMillis(int phase, String action) {
         if (phase == PHASE_CHECKOUT && !Config.requireLocationForCheckout(this)) {
-            return 0L;
+            return CHECKOUT_UNLOCK_BURST_MILLIS;
         }
         if (phase == PHASE_CHECKIN && checkInInsideLatched) {
             return 0L;
@@ -547,12 +556,27 @@ public class GuardService extends Service {
         return 0L;
     }
 
+    private void startCheckoutUnlockBurst(String reason) {
+        long now = System.currentTimeMillis();
+        unlockBurstUntilMillis = Math.max(unlockBurstUntilMillis, now + CHECKOUT_UNLOCK_BURST_MILLIS);
+        checkoutUnlockBurstActive = true;
+        handler.removeCallbacks(tickRunnable);
+        handler.postDelayed(tickRunnable, CHECKOUT_UNLOCK_TICK_MILLIS);
+        AppLog.i(this, "checkout unlock burst started duration="
+                + CHECKOUT_UNLOCK_BURST_MILLIS
+                + "ms tick="
+                + CHECKOUT_UNLOCK_TICK_MILLIS
+                + "ms reason="
+                + reason);
+    }
+
     private void startUnlockBurst(long durationMillis, String reason) {
         if (durationMillis <= 0L) {
             return;
         }
         long now = System.currentTimeMillis();
         unlockBurstUntilMillis = Math.max(unlockBurstUntilMillis, now + durationMillis);
+        checkoutUnlockBurstActive = false;
         handler.removeCallbacks(tickRunnable);
         handler.postDelayed(tickRunnable, TICK_VERY_NEAR_MILLIS);
         updateLocationRequestPolicy(true);
@@ -582,8 +606,12 @@ public class GuardService extends Service {
             return TICK_VERY_NEAR_MILLIS;
         }
         if (inUnlockBurst()) {
+            if (phase == PHASE_CHECKOUT && checkoutUnlockBurstActive) {
+                return CHECKOUT_UNLOCK_TICK_MILLIS;
+            }
             return TICK_VERY_NEAR_MILLIS;
         }
+        checkoutUnlockBurstActive = false;
         if (phase != PHASE_CHECKIN && !Config.requireLocationForCheckout(this)) {
             return phase == PHASE_CHECKOUT ? TICK_FAR_MILLIS : TICK_DEFAULT_MILLIS;
         }
@@ -930,6 +958,7 @@ public class GuardService extends Service {
         checkInApproachLatched = false;
         checkInInsideLatched = false;
         checkoutConfirmAlertPosted = false;
+        checkoutUnlockBurstActive = false;
         autoOpenReadyAtLastEvaluate = false;
         autoOpenRetryUntilMillis = 0L;
         NotificationHelper.cancelAlert(this);

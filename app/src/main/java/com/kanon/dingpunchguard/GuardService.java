@@ -2,7 +2,6 @@ package com.kanon.dingpunchguard;
 
 import android.Manifest;
 import android.app.KeyguardManager;
-import android.app.NotificationManager;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -19,7 +18,6 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
-import android.provider.Settings;
 import android.widget.Toast;
 
 import java.time.LocalDate;
@@ -44,7 +42,6 @@ public class GuardService extends Service {
     private static final int PHASE_IDLE = 0;
     private static final int PHASE_CHECKIN = 1;
     private static final int PHASE_CHECKOUT = 2;
-    private static final long ASSUMED_OPEN_SUCCESS_DELAY_MILLIS = 5_000L;
     private static final long OPEN_FOREGROUND_VERIFY_DELAY_MILLIS = 2_500L;
     private static final long AUTO_OPEN_RETRY_WINDOW_MILLIS = 30_000L;
     private static final long AUTO_OPEN_RETRY_INTERVAL_MILLIS = 5_000L;
@@ -133,7 +130,6 @@ public class GuardService extends Service {
             if (openDingTalk()) {
                 long openMillis = Config.lastDingTalkOpenMillis(this);
                 verifyDingTalkForegroundAfterLaunch(phase, openMillis, false);
-                maybeRecordAssumedOpenSuccess(phase, openMillis);
             }
             if (currentPhase(this) == PHASE_IDLE) {
                 handler.postDelayed(this::stopEverything, 1_000L);
@@ -418,9 +414,7 @@ public class GuardService extends Service {
             case OPEN_DINGTALK:
                 AppLog.i(this, "check-out ready action=" + action + " device=" + device.logText() + " becameAutoOpenReady=" + becameAutoOpenReady);
                 maybeOpenDingTalk(forceAlert || becameAutoOpenReady);
-                if (!Config.assumeDingTalkOpenMeansSuccess(this)) {
-                    postCheckoutConfirmAlertOnce();
-                }
+                postCheckoutConfirmAlertOnce();
         }
     }
 
@@ -510,7 +504,6 @@ public class GuardService extends Service {
             if (openDingTalk()) {
                 long openMillis = Config.lastDingTalkOpenMillis(this);
                 verifyDingTalkForegroundAfterLaunch(phase, openMillis, retryAfterForegroundFailure);
-                maybeRecordAssumedOpenSuccess(phase, openMillis);
             }
             lastAutoOpenMillis = now;
         }
@@ -749,58 +742,6 @@ public class GuardService extends Service {
                 handler.postDelayed(tickRunnable, AUTO_OPEN_RETRY_INTERVAL_MILLIS);
             }
         }, OPEN_FOREGROUND_VERIFY_DELAY_MILLIS);
-    }
-
-    private void maybeRecordAssumedOpenSuccess(int phase, long openMillis) {
-        if (!Config.assumeDingTalkOpenMeansSuccess(this)) {
-            AppLog.i(this, "assumed open success skipped because setting is off");
-            return;
-        }
-        if (phase != PHASE_CHECKIN && phase != PHASE_CHECKOUT) {
-            AppLog.i(this, "assumed open success skipped outside punch phase phase=" + phase);
-            return;
-        }
-        if (!ForegroundAppVerifier.hasUsageStatsAccess(this)) {
-            AppLog.i(this, "assumed open success skipped because usage stats access is not granted");
-            NotificationHelper.postAlert(
-                    this,
-                    phase == PHASE_CHECKIN ? "上班打卡待确认" : "下班打卡待确认",
-                    "系统未允许本应用验证钉钉是否真的进入前台，不能自动记录成功。请确认钉钉极速打卡完成后手动确认。",
-                    phase == PHASE_CHECKIN ? Config.ACTION_CONFIRM_CHECKIN : Config.ACTION_CONFIRM_CHECKOUT
-            );
-            return;
-        }
-        AppLog.i(this, "assumed open success scheduled phase=" + phase + " delayMs=" + ASSUMED_OPEN_SUCCESS_DELAY_MILLIS);
-        handler.postDelayed(() -> {
-            if (!Config.assumeDingTalkOpenMeansSuccess(this)) {
-                AppLog.i(this, "assumed open success canceled because setting is off");
-                return;
-            }
-            if (Config.lastDingTalkOpenMillis(this) != openMillis) {
-                AppLog.i(this, "assumed open success canceled because open attempt is stale");
-                return;
-            }
-            boolean dingTalkWasForeground = ForegroundAppVerifier.wasPackageForegroundSince(this, Config.DINGTALK_PACKAGE, openMillis);
-            if (!dingTalkWasForeground) {
-                String latestForegroundPackage = ForegroundAppVerifier.lastForegroundPackageSince(this, openMillis);
-                AppLog.i(this, "assumed open success canceled because DingTalk was not seen in foreground latestForeground=" + latestForegroundPackage);
-                NotificationHelper.postAlert(
-                        this,
-                        phase == PHASE_CHECKIN ? "上班打卡未确认" : "下班打卡未确认",
-                        "已尝试打开钉钉，但未检测到钉钉进入前台，因此没有自动记录成功。请手动打开钉钉完成极速打卡后确认。",
-                        phase == PHASE_CHECKIN ? Config.ACTION_CONFIRM_CHECKIN : Config.ACTION_CONFIRM_CHECKOUT
-                );
-                return;
-            }
-            Config.markDingTalkVerifiedForeground(this, System.currentTimeMillis());
-            boolean recorded = false;
-            if (phase == PHASE_CHECKIN) {
-                recorded = PunchRecorder.recordCheckIn(this, System.currentTimeMillis(), "钉钉进入前台兜底");
-            } else if (phase == PHASE_CHECKOUT) {
-                recorded = PunchRecorder.recordCheckOut(this, System.currentTimeMillis(), "钉钉进入前台兜底");
-            }
-            AppLog.i(this, "assumed open success fired phase=" + phase + " recorded=" + recorded);
-        }, ASSUMED_OPEN_SUCCESS_DELAY_MILLIS);
     }
 
     private void startLocationUpdates() {

@@ -149,7 +149,6 @@ class MainActivity : ComponentActivity() {
                     onSave = { saveSettings(showToast = true) },
                     onRequestPermissions = { requestCorePermissions() },
                     onOpenLocationSettings = { openLocationPermissionSettings() },
-                    onOpenNotificationListener = { openNotificationListenerSettings() },
                     onOpenAccessibilitySettings = { openAccessibilitySettings() },
                     onOpenUsageAccessSettings = { openUsageAccessSettings() },
                     onOpenAppNotificationSettings = { openAppNotificationSettings() },
@@ -333,9 +332,6 @@ class MainActivity : ComponentActivity() {
 
     private fun saveSettings(showToast: Boolean): Boolean {
         return try {
-            val requestedAssumeOpenSuccess = form.assumeOpenSuccess
-            val usageStatsGranted = ForegroundAppVerifier.hasUsageStatsAccess(this)
-            val assumeOpenSuccess = requestedAssumeOpenSuccess && usageStatsGranted
             Config.saveUserSettings(
                 this,
                 form.placeName.ifBlank { "公司" },
@@ -347,8 +343,7 @@ class MainActivity : ComponentActivity() {
                 form.checkoutTime.ifBlank { "18:00" },
                 max(1, form.reminderMinutes.toIntOrNull() ?: 2),
                 max(30, form.checkoutGraceMinutes.toIntOrNull() ?: 180),
-                form.requireLocationForCheckout,
-                assumeOpenSuccess
+                form.requireLocationForCheckout
             )
             form = SettingsForm.from(this).copy(amapLink = form.amapLink)
             TimeScheduler.scheduleAll(this)
@@ -360,13 +355,7 @@ class MainActivity : ComponentActivity() {
             }
             refreshDashboard()
             if (showToast) {
-                val message = if (requestedAssumeOpenSuccess && !usageStatsGranted) {
-                    selectedTab = 2
-                    "设置已保存；自动记录已关闭，需先授权前台验证"
-                } else {
-                    "设置已保存"
-                }
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "设置已保存", Toast.LENGTH_LONG).show()
             }
             true
         } catch (e: Exception) {
@@ -524,14 +513,6 @@ class MainActivity : ComponentActivity() {
             AppLog.i(this, "DingTalk launch requested after activity moved to background through guard service")
             startGuardService(Config.ACTION_OPEN_DING)
         }, 700L)
-    }
-
-    private fun openNotificationListenerSettings() {
-        try {
-            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        } catch (_: Exception) {
-            openAppSettings()
-        }
     }
 
     private fun openAccessibilitySettings() {
@@ -748,9 +729,6 @@ class MainActivity : ComponentActivity() {
         if (!accessibilityEnabled) {
             warnings.add("未开启钉钉内部提示识别，极速打卡成功弹层无法自动记录。")
         }
-        if (Config.assumeDingTalkOpenMeansSuccess(this) && !usageStatsGranted) {
-            warnings.add("前台兜底记录需要前台验证权限，否则不能确认钉钉是否真的打开。")
-        }
         if (!exactAlarm) {
             warnings.add("准时提醒权限未授权，到点提醒可能延迟。")
         }
@@ -833,7 +811,6 @@ class MainActivity : ComponentActivity() {
             fineLocationGranted = hasFineLocationPermission(),
             backgroundLocationGranted = hasBackgroundLocationPermission(),
             notificationGranted = notificationGranted,
-            notificationListenerEnabled = isDingTalkNotificationListenerEnabled(),
             accessibilityObserverEnabled = accessibilityEnabled,
             usageStatsGranted = usageStatsGranted,
             notificationSwitchGranted = backgroundLaunchStatus.notificationsEnabled,
@@ -850,7 +827,6 @@ class MainActivity : ComponentActivity() {
             exactAlarmAllowed = exactAlarm,
             batteryAllowed = isIgnoringBatteryOptimizations(),
             dingTalkInstalled = dingTalkInstalled,
-            assumeOpenSuccess = Config.assumeDingTalkOpenMeansSuccess(this),
             warnings = warnings
         )
     }
@@ -1024,11 +1000,6 @@ class MainActivity : ComponentActivity() {
         return powerManager != null && powerManager.isIgnoringBatteryOptimizations(packageName)
     }
 
-    private fun isDingTalkNotificationListenerEnabled(): Boolean {
-        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        return enabledComponentsContain(enabled, ComponentName(this, DingTalkPunchObserver::class.java))
-    }
-
     private fun isDingTalkAccessibilityObserverEnabled(): Boolean {
         val accessibilityEnabled = Settings.Secure.getInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
         if (!accessibilityEnabled) {
@@ -1109,8 +1080,7 @@ private data class SettingsForm(
     val checkoutTime: String = "18:00",
     val reminderMinutes: String = "2",
     val checkoutGraceMinutes: String = "180",
-    val requireLocationForCheckout: Boolean = false,
-    val assumeOpenSuccess: Boolean = false
+    val requireLocationForCheckout: Boolean = false
 ) {
     companion object {
         fun from(context: android.content.Context): SettingsForm {
@@ -1124,8 +1094,7 @@ private data class SettingsForm(
                 checkoutTime = Config.format(Config.checkoutTime(context)),
                 reminderMinutes = Config.reminderMinutes(context).toString(),
                 checkoutGraceMinutes = Config.checkoutGraceMinutes(context).toString(),
-                requireLocationForCheckout = Config.requireLocationForCheckout(context),
-                assumeOpenSuccess = Config.assumeDingTalkOpenMeansSuccess(context)
+                requireLocationForCheckout = Config.requireLocationForCheckout(context)
             )
         }
     }
@@ -1159,7 +1128,6 @@ private data class DashboardState(
     val fineLocationGranted: Boolean = false,
     val backgroundLocationGranted: Boolean = false,
     val notificationGranted: Boolean = false,
-    val notificationListenerEnabled: Boolean = false,
     val accessibilityObserverEnabled: Boolean = false,
     val usageStatsGranted: Boolean = false,
     val notificationSwitchGranted: Boolean = false,
@@ -1176,7 +1144,6 @@ private data class DashboardState(
     val exactAlarmAllowed: Boolean = false,
     val batteryAllowed: Boolean = false,
     val dingTalkInstalled: Boolean = false,
-    val assumeOpenSuccess: Boolean = false,
     val warnings: List<String> = emptyList()
 )
 
@@ -1239,7 +1206,6 @@ private fun DingPunchApp(
     onSave: () -> Unit,
     onRequestPermissions: () -> Unit,
     onOpenLocationSettings: () -> Unit,
-    onOpenNotificationListener: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
     onOpenAppNotificationSettings: () -> Unit,
@@ -1318,7 +1284,6 @@ private fun DingPunchApp(
                     dashboard = dashboard,
                     onRequestPermissions = onRequestPermissions,
                     onOpenLocationSettings = onOpenLocationSettings,
-                    onOpenNotificationListener = onOpenNotificationListener,
                     onOpenAccessibilitySettings = onOpenAccessibilitySettings,
                     onOpenUsageAccessSettings = onOpenUsageAccessSettings,
                     onOpenAppNotificationSettings = onOpenAppNotificationSettings,
@@ -1743,8 +1708,6 @@ private fun homeLocationValueLineHeight(fontSize: TextUnit, large: Boolean): Tex
 private fun HomeStatusGrid(dashboard: DashboardState, profile: HomeLayoutProfile) {
     val recognition = when {
         dashboard.accessibilityObserverEnabled -> "内部提示识别"
-        dashboard.notificationListenerEnabled -> "可自动记录"
-        dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "前台后记录"
         dashboard.dingTalkInstalled -> "可打开钉钉"
         else -> "未找到钉钉"
     }
@@ -1781,10 +1744,7 @@ private fun HomeStatusGrid(dashboard: DashboardState, profile: HomeLayoutProfile
                 value = recognition,
                 meta = when {
                     dashboard.accessibilityObserverEnabled -> "极速打卡提示"
-                    dashboard.notificationListenerEnabled -> "钉钉通知确认"
-                    dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "验证前台后记录"
-                    dashboard.assumeOpenSuccess -> "缺少前台验证"
-                    else -> "通知或手动确认"
+                    else -> "手动确认兜底"
                 },
                 modifier = Modifier.weight(1f)
             ) {
@@ -2050,8 +2010,7 @@ private fun HomeProcessPanel(
     val ruleStatus = if (dashboard.targetConfigured) "已设置" else "待设置"
     val reminderStatus = if (dashboard.enabled) "已开启" else "未开启"
     val dingStatus = when {
-        dashboard.notificationListenerEnabled -> "可识别成功"
-        dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "可验证前台"
+        dashboard.accessibilityObserverEnabled -> "可识别成功"
         dashboard.dingTalkInstalled -> "可打开钉钉"
         else -> "未找到钉钉"
     }
@@ -2089,12 +2048,11 @@ private fun HomeProcessPanel(
                 number = "3",
                 title = "打开钉钉",
                 value = when {
-                    dashboard.notificationListenerEnabled -> "成功通知后自动记录"
-                    dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "确认前台后自动记录"
+                    dashboard.accessibilityObserverEnabled -> "内部提示自动记录"
                     else -> "提醒后手动确认"
                 },
                 status = dingStatus,
-                tone = if (dashboard.dingTalkInstalled || dashboard.notificationListenerEnabled) AppColors.Primary else AppColors.Warning
+                tone = if (dashboard.dingTalkInstalled || dashboard.accessibilityObserverEnabled) AppColors.Primary else AppColors.Warning
             )
             Text(
                 text = if (dashboard.warnings.isEmpty()) "当前没有明显阻塞项" else "${dashboard.warnings.size} 项需要在检查页处理",
@@ -2394,14 +2352,6 @@ private fun SettingsScreen(
                     checked = form.requireLocationForCheckout,
                     onCheckedChange = { onFormChange(form.copy(requireLocationForCheckout = it)) }
                 )
-                Divider(color = AppColors.Border, modifier = Modifier.padding(vertical = 8.dp))
-                SwitchRow(
-                    title = "钉钉进入前台后自动记录",
-                    subtitle = "需要“前台验证”权限。只能兜底确认钉钉已打开，不能替代钉钉成功通知。",
-                    checked = form.assumeOpenSuccess,
-                    warning = true,
-                    onCheckedChange = { onFormChange(form.copy(assumeOpenSuccess = it)) }
-                )
             }
             if (enabled) {
                 OutlinedIconButton(
@@ -2507,7 +2457,6 @@ private fun PermissionsScreen(
     dashboard: DashboardState,
     onRequestPermissions: () -> Unit,
     onOpenLocationSettings: () -> Unit,
-    onOpenNotificationListener: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
     onOpenAppNotificationSettings: () -> Unit,
@@ -2567,13 +2516,6 @@ private fun PermissionsScreen(
                     onAction = onOpenOverlaySettings
                 )
                 PermissionLine(
-                    title = "识别钉钉成功通知",
-                    subtitle = if (dashboard.notificationListenerEnabled) "已启用" else "仅识别系统通知，不识别内部弹层",
-                    ok = dashboard.notificationListenerEnabled,
-                    action = "处理",
-                    onAction = onOpenNotificationListener
-                )
-                PermissionLine(
                     title = "识别钉钉内部提示",
                     subtitle = if (dashboard.accessibilityObserverEnabled) "已启用" else "用于极速打卡成功弹层",
                     ok = dashboard.accessibilityObserverEnabled,
@@ -2582,7 +2524,7 @@ private fun PermissionsScreen(
                 )
                 PermissionLine(
                     title = "前台验证",
-                    subtitle = if (dashboard.usageStatsGranted) "可验证钉钉是否真的打开" else "用于防止打开失败却自动记成功",
+                    subtitle = if (dashboard.usageStatsGranted) "可验证钉钉是否真的打开" else "用于打开失败后的重试和提醒",
                     ok = dashboard.usageStatsGranted,
                     action = "处理",
                     onAction = onOpenUsageAccessSettings
@@ -2666,18 +2608,10 @@ private fun PermissionsScreen(
                     "成功识别",
                     when {
                         dashboard.accessibilityObserverEnabled -> "可识别钉钉内部提示"
-                        dashboard.notificationListenerEnabled -> "可识别钉钉系统通知"
                         else -> "只能提醒或手动确认"
                     }
                 )
-                StatusLine(
-                    "前台兜底记录",
-                    when {
-                        dashboard.assumeOpenSuccess && dashboard.usageStatsGranted -> "已开启"
-                        dashboard.assumeOpenSuccess -> "缺少前台验证"
-                        else -> "关闭"
-                    }
-                )
+                StatusLine("前台验证", if (dashboard.usageStatsGranted) "可检查钉钉弹出状态" else "未授权")
                 StatusLine("当前风险项", if (dashboard.warnings.isEmpty()) "暂无明显阻塞" else "${dashboard.warnings.size} 项")
             }
         }

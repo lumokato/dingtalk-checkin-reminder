@@ -9,13 +9,11 @@ import java.util.List;
 
 public class DingTalkAccessibilityObserver extends AccessibilityService {
     private static final long MIN_ROOT_SCAN_INTERVAL_MS = 700L;
-    private static final long MIN_DEBUG_LOG_INTERVAL_MS = 10_000L;
     private static final long DUPLICATE_MATCH_WINDOW_MS = 30_000L;
     private static final int MAX_NODE_COUNT = 160;
     private static final int MAX_TEXT_CHARS = 5_000;
 
     private long lastRootScanMillis;
-    private long lastDebugLogMillis;
     private long lastMatchedMillis;
     private int lastMatchedHash;
 
@@ -57,7 +55,6 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
         String rootText = rootTextBuilder.toString();
         String visibleText = eventText + rootText;
         if (visibleText.trim().isEmpty()) {
-            maybeLogDebug(now, event, visibleText, false, PunchRecorder.KIND_UNKNOWN);
             return;
         }
 
@@ -70,7 +67,6 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
         String matchedText = eventSuccess ? eventText : rootText;
         int kind = PunchRecorder.inferKindFromTextOrSchedule(this, matchedText);
         if (!successMatch) {
-            maybeLogDebug(now, event, visibleText, false, kind);
             return;
         }
 
@@ -99,7 +95,6 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
                         + " eventTextMatch=" + eventSuccess
                         + " rootTextMatch=" + rootSuccess
                         + " " + PunchRecorder.dingTalkSuccessDebug(this, matchedText)
-                        + " text=" + summarizeMatchedText(matchedText)
         );
     }
 
@@ -119,25 +114,6 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
             return true;
         }
         return now - lastRootScanMillis >= MIN_ROOT_SCAN_INTERVAL_MS;
-    }
-
-    private void maybeLogDebug(long now, AccessibilityEvent event, String text, boolean successMatch, int kind) {
-        boolean importantEvent = event.getEventType() == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
-                || text.length() > 0;
-        if (!importantEvent && now - lastDebugLogMillis < MIN_DEBUG_LOG_INTERVAL_MS) {
-            return;
-        }
-        lastDebugLogMillis = now;
-        AppLog.i(
-                this,
-                "DingTalk accessibility debug event="
-                        + eventTypeName(event.getEventType())
-                        + " kind=" + kind
-                        + " successMatch=" + successMatch
-                        + " textLength=" + text.length()
-                        + " textHash=" + Integer.toHexString(text.hashCode())
-                        + " " + PunchRecorder.dingTalkSuccessDebug(this, text)
-        );
     }
 
     private static void appendEventText(StringBuilder builder, AccessibilityEvent event) {
@@ -195,14 +171,6 @@ public class DingTalkAccessibilityObserver extends AccessibilityService {
         if (value != null && value.length() > 0 && builder.length() < MAX_TEXT_CHARS) {
             builder.append(value).append('\n');
         }
-    }
-
-    private static String summarizeMatchedText(String text) {
-        String oneLine = text == null ? "" : text.replaceAll("\\s+", " ").trim();
-        if (oneLine.length() <= 120) {
-            return oneLine;
-        }
-        return oneLine.substring(0, 120) + "...";
     }
 
     private static String eventTypeName(int eventType) {

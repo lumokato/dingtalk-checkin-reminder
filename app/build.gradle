@@ -25,8 +25,8 @@ android {
         applicationId "com.kanon.dingpunchguard"
         minSdk 26
         targetSdk 36
-        versionCode 36
-        versionName "0.2.22"
+        versionCode 37
+        versionName "0.2.23"
     }
 
     if (signingPropsFile.exists()) {

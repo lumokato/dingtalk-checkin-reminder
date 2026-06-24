@@ -90,10 +90,6 @@ final class Config {
         return prefs(context).getBoolean("checkout_requires_location", false);
     }
 
-    static boolean assumeDingTalkOpenMeansSuccess(Context context) {
-        return prefs(context).getBoolean("assume_open_success", false);
-    }
-
     static long lastDingTalkOpenMillis(Context context) {
         return prefs(context).getLong("last_dingtalk_open_millis", 0L);
     }
@@ -131,8 +127,7 @@ final class Config {
             String checkoutTime,
             int reminderMinutes,
             int checkoutGraceMinutes,
-            boolean checkoutRequiresLocation,
-            boolean assumeOpenSuccess
+            boolean checkoutRequiresLocation
     ) {
         prefs(context).edit()
                 .putString("place_name", placeName)
@@ -144,10 +139,10 @@ final class Config {
                 .putString("checkout_time", normalizeTime(checkoutTime, "18:00"))
                 .remove("checkin_end")
                 .remove("work_minutes")
+                .remove("assume_open_success")
                 .putInt("reminder_minutes", reminderMinutes)
                 .putInt("checkout_grace_minutes", checkoutGraceMinutes)
                 .putBoolean("checkout_requires_location", checkoutRequiresLocation)
-                .putBoolean("assume_open_success", assumeOpenSuccess)
                 .apply();
     }
 
